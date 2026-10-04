@@ -1,0 +1,73 @@
+analysis_mode: two_particle
+trials:
+- id: MI29_average_radius
+  csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_MI29_online-video-cutter.com_20260729_144448_20260729_152045_20260729_152119\pair_state_vectors.csv
+  state_source: canonical
+  pressure_torr: 3.9
+  calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\MI29_calibration.json
+  weight: 1.0
+
+experiment:
+  bottom_temperature_k: 373.0
+  top_temperature_k: 77.0
+  ambient_temperature_k: 298.0
+  temperature_field_radius_m: 0.020
+  gas_velocity_m_s: [0.0, 0.0, 0.0]
+
+# Arithmetic mean of the nine aligned fixed-density SP radius estimates. Mass
+# is derived from rho*(4/3)*pi*r^3 at the same 700 kg/m^3 datasheet density.
+particles:
+  particle_1:
+    radius_m: 3.746938775510204e-05
+    mass_kg: 1.5424689834198875e-10
+  particle_2:
+    radius_m: 3.746938775510204e-05
+    mass_kg: 1.5424689834198875e-10
+
+drag:
+  model: allen_raabe
+
+interaction:
+  model: inverse_power
+  symmetry: compare
+  compare_no_interaction: true
+  reference_gap_m: 1.0e-4
+  nonreciprocity:
+    eta: {min: "-1.0", max: "1.0", step: "1.0"}
+  parameters:
+    A: {min: "-1e-12", max: "1e-12", step: "1e-13"}
+    n: {min: "0.0", max: "5.0", step: "0.5"}
+
+environment_force:
+  mode: compare
+  model: vertical_constant
+  reference_height_m: 0.005
+  reference_time_s: 0.0
+  parameters:
+    env_u0_z_m_s: {min: "-0.002", max: "0.002", step: "0.002"}
+
+objective:
+  weights: {position: 1.0, velocity: 0.5, acceleration: 0.1}
+
+solver:
+  method: Radau
+  rtol: 1.0e-8
+  position_atol_m: 1.0e-9
+  velocity_atol_m_s: 1.0e-7
+  max_step_fraction: 0.25
+
+search:
+  max_candidates: 100000
+  refinement_levels: 0
+  refinement_factor: 10
+  top_k: 5
+  joint_search: false
+  com_max_z_score: 3.0
+  heldout_fraction: 0.2
+  model_selection_relative_tolerance: 0.01
+  eta_bootstrap_samples: 500
+  eta_bootstrap_confidence: 0.95
+  tolerance_ranking_top_k: 3
+  tolerance_score_relative_limit: 1.0e-3
+
+output_dir: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs\mediated_force\translational\guided_run_MI29_aligned_average_radius

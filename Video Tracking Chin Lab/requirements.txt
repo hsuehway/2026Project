@@ -1,0 +1,12 @@
+numpy
+pandas
+matplotlib
+scipy
+scikit-learn>=1.4,<2
+PyYAML
+pims
+trackpy
+imageio
+imageio-ffmpeg
+av
+pillow

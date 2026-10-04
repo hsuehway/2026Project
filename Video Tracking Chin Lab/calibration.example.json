@@ -1,0 +1,43 @@
+{
+  "chamber": {
+    "bottom_diameter_mm": 33.7,
+    "top_diameter_mm": 25.4,
+    "gap_mm": 10.0
+  },
+  "front": {
+    "bottom_left_px": [55.0, 520.0],
+    "bottom_right_px": [930.0, 520.0],
+    "top_left_px": [150.0, 25.0],
+    "top_right_px": [840.0, 25.0]
+  },
+  "side": {
+    "bottom_left_px": [35.0, 520.0],
+    "bottom_right_px": [1010.0, 520.0],
+    "top_left_px": [135.0, 30.0],
+    "top_right_px": [920.0, 30.0]
+  },
+  "front_roi": {
+    "x": 0,
+    "y": 0,
+    "width": 970,
+    "height": 580
+  },
+  "side_roi": {
+    "x": 970,
+    "y": 0,
+    "width": 1075,
+    "height": 580
+  },
+  "front_focus_roi": {
+    "x": 20,
+    "y": 30,
+    "width": 920,
+    "height": 510
+  },
+  "side_focus_roi": {
+    "x": 20,
+    "y": 30,
+    "width": 1015,
+    "height": 510
+  }
+}

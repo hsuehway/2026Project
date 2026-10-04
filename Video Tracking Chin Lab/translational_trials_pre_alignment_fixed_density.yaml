@@ -1,0 +1,84 @@
+analysis_mode: single_particle
+trials:
+  - id: SP1
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP1_online-video-cutter.com_20260824_111521_20260824_112847_20260824_112958\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.2
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP1_calibration.json
+  - id: SP2
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP2_online-video-cutter.com_20260824_124740_20260824_125258_20260824_125318\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.5
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP2_calibration.json
+  - id: SP4
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP4_online-video-cutter.com_20260831_113005_20260831_150815_20260831_151120\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.6
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP4_calibration.json
+  - id: SP6
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP6_online-video-cutter.com_20260831_114256_20260831_150831_20260831_151132\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.7
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP6_calibration.json
+  - id: SP7
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP7_cut_20260831_115050_20260831_150851_20260831_151143\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.4
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP7_calibration.json
+  - id: SP8
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP8_cut_20260831_120003_20260831_150909_20260831_151155\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.7
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP8_calibration.json
+  - id: SP10
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP10_cut_20260831_120556_20260831_150930_20260831_151208\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.6
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP10_calibration.json
+  - id: SP11
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP11_cut_20260831_121323_20260831_151003_20260831_151218\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.3
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP11_calibration.json
+  - id: SP13
+    csv_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs_background\state_vectors\state_vectors_SP13_cut_20260831_121919_20260831_151024_20260831_151228\particle_state_vectors.csv
+    state_source: smoothed
+    weight: 1
+    pressure_torr: 1.9
+    calibration_path: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\calibrations\SP13_calibration.json
+experiment:
+  bottom_temperature_k: 373
+  top_temperature_k: 77
+  ambient_temperature_k: 290
+  temperature_field_radius_m: 0.030
+  gas_velocity_m_s: [0, 0, 0]
+particles:
+  particle_1:
+    radius_m: 0.00008
+    mass_kg: 1.501262409e-9
+drag:
+  model: allen_raabe
+inference:
+  enabled: true
+  density_mode: fixed
+  density_mean_kg_m3: 700
+  radius_min_m: 2.0e-5
+  radius_max_m: 8.0e-5
+  radius_points: 246
+  weak_window_frames: 21
+  weak_stride_frames: 5
+  holdout_fraction: 0.2
+  environment_mode: off
+  maximum_environment_acceleration_m_s2: 5
+  environment_penalty_weight: 0.05
+population_calibration:
+  enabled: false
+output_dir: C:\Users\gmalb\OneDrive\Documents\Video Tracking Chin Lab\outputs\mediated_force\translational\guided_run_pre_alignment_fixed_density

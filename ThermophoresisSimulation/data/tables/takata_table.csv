@@ -1,0 +1,18 @@
+# Takata et al. (1994) dimensionless thermophoretic force f_T
+# Source: Zheng (2002) Adv. Colloid Interface Sci. 97, 255 — Table 3
+# Hard-sphere Boltzmann equation, kappa21 = 0 (conducting particle limit)
+# Columns: Kn, f_T
+Kn,f_T
+0.09611,0.007
+0.1922,0.046
+0.2883,0.115
+0.3844,0.208
+0.5767,0.412
+0.7689,0.602
+1.153,0.903
+1.922,1.259
+3.845,1.6
+7.689,1.782
+11.53,1.84
+19.22,1.884
+1000.0,1.942

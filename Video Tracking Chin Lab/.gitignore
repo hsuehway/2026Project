@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+outputs/
+outputs_background/
+outputs_strict_preview/
+calibration.json
+.matplotlib_cache/
+.matplotlib-cache/
+outputs_bubble_shapes/
+.particle_radius_studio_session.json
+.translational_force_studio_session.json
+.video_analysis_studio_session.json
+.sp_trajectory_studio_session.json
