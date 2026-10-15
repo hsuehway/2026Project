@@ -34,14 +34,14 @@ generated/*
 !generated/README.md
 archive/*
 !archive/README.md
-analysis/*/data/
-analysis/*/figures/
-analysis/*/reference/
-analysis/*/results/
-analysis/*/simulator/
-analysis/*/tracking_verification/
-analysis/*/video/
-analysis/*/orbit_data.js
+analysis/**/data/
+analysis/**/figures/
+analysis/**/reference/
+analysis/**/results/
+analysis/**/simulator/
+analysis/**/tracking-verification/
+analysis/**/video/
+analysis/**/orbit-data.js
 
 # Local sessions, review assets, and nested tool state.
 **/.*_session.json

@@ -39,7 +39,8 @@ See `ThermophoresisSimulation/README.md` for the model components and setup.
 | --- | --- | --- |
 | `Video Tracking Chin Lab/` | Video analyzer, tracking scripts, and local tracking workspace | Code is versioned; videos, calibration state, sessions, and outputs stay local |
 | `ThermophoresisSimulation/` | Gas-cell, thermophoretic-force, rigid-body, and 6-DOF simulation | Source, tests, notebooks, and small reference tables are versioned |
-| `analysis/sp6-orbits/` | Maintained SP6 orbit-analysis code and viewer | Code is versioned; run-specific data, video, and figures stay local |
+| `analysis/orbit-detection/` | Reusable CSV orbit detection and classification | Code and tests are versioned |
+| `analysis/studies/sp6/` | SP6-specific viewer, scripts, assumptions, and documented results | Study code is versioned; data, video, and figures stay local |
 | `reference/thermophoresis-simulator/` | Supplied simulator and theory reference | Small reference files may be versioned |
 | `derived-data/` | Reproducible exports from tracking runs | Ignored |
 | `generated/` | Generated reports and documents | Ignored |

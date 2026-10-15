@@ -14,7 +14,9 @@ IDs, not generic folder names.
 ├── Video Tracking Chin Lab/          active video-tracking workspace
 ├── ThermophoresisSimulation/         active physical simulation codebase
 ├── analysis/
-│   └── sp6-orbits/                   maintained orbit-analysis workflow
+│   ├── orbit-detection/              reusable orbit-analysis code and tests
+│   └── studies/
+│       └── sp6/                      SP6-specific viewer and workflow
 ├── reference/
 │   └── thermophoresis-simulator/     supplied simulator/reference material
 ├── derived-data/                     local tracking exports
@@ -36,7 +38,7 @@ while all new organizational folders use the convention above.
 
 | Previous path | Organized path | Meaning |
 | --- | --- | --- |
-| `orbit/` | `analysis/sp6-orbits/` | Maintained SP6 orbit-analysis code and local results |
+| `orbit/` | `analysis/orbit-detection/` and `analysis/studies/sp6/` | Reusable orbit analysis separated from the SP6 study |
 | `sp6 orbits/` | `archive/sp6-orbits-legacy/` | Superseded duplicate snapshot |
 | `Simulation/` | `reference/thermophoresis-simulator/` | Supplied HTML simulator, fit notes, and theory PDF |
 | `SP6_online-video-cutter.com_20260831_114256/` | `derived-data/sp6-background-tracking/` | Derived SP6 tracking export |

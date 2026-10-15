@@ -38,8 +38,9 @@ cryogenic-to-room-temperature regime; their stated domains must be respected.
 
 ### Reproducible analyses and local artifacts
 
-`analysis/` contains maintained analysis code, currently including the SP6
-orbit workflow. `reference/` contains supplied or legacy reference material.
+`analysis/orbit-detection/` contains reusable orbit-analysis code, while
+`analysis/studies/` contains dataset-specific workflows such as SP6.
+`reference/` contains supplied or legacy reference material.
 Run-specific exports are grouped under `derived-data/`, generated documents
 under `generated/`, and superseded local copies under `archive/`. These artifact
 trees are intentionally excluded from ordinary Git history; their source paths

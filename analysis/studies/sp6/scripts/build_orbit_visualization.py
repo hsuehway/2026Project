@@ -13,8 +13,8 @@ from scipy.signal import find_peaks
 from scipy.stats import t as student_t
 
 
-ROOT = Path(__file__).resolve().parents[3]
-ORBIT = ROOT / "analysis" / "sp6-orbits"
+ROOT = Path(__file__).resolve().parents[4]
+STUDY = Path(__file__).resolve().parents[1]
 SOURCE_TRACKS = (
     ROOT
     / "Video Tracking Chin Lab"
@@ -24,10 +24,10 @@ SOURCE_TRACKS = (
     / "tracking_full_57s_end"
     / "tracks_3d.csv"
 )
-POSITIONS = ORBIT / "data" / "SP6_position_time.csv"
-INTERVALS = ORBIT / "data" / "SP6_circular_intervals.csv"
-SUMMARY = ORBIT / "data" / "SP6_mode_summary.json"
-TEMPERATURE = ORBIT / "data" / "SP6_temperature_trace_1Hz.csv"
+POSITIONS = STUDY / "data" / "SP6_position_time.csv"
+INTERVALS = STUDY / "data" / "SP6_circular_intervals.csv"
+SUMMARY = STUDY / "data" / "SP6_mode_summary.json"
+TEMPERATURE = STUDY / "data" / "SP6_temperature_trace_1Hz.csv"
 AUDIT_RERUN = Path("/tmp/sp6-audit-20261004/SP6_position_time.csv")
 
 
@@ -280,12 +280,12 @@ def main() -> None:
         "audit": audit,
     }
 
-    audit_path = ORBIT / "data" / "SP6_uncertainty_audit.json"
+    audit_path = STUDY / "data" / "SP6_uncertainty_audit.json"
     audit_path.write_text(
         json.dumps({"uncertainty": uncertainty, "audit": audit}, indent=2) + "\n",
         encoding="utf-8",
     )
-    js_path = ORBIT / "orbit_data.js"
+    js_path = STUDY / "orbit-data.js"
     js_path.write_text(
         "window.SP6_DATA=" + json.dumps(data, separators=(",", ":")) + ";\n",
         encoding="utf-8",
