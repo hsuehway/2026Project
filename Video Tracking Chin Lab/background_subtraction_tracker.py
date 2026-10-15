@@ -48,6 +48,33 @@ IMAGE_EXTENSIONS = {".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 VIDEO_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".tif", ".tiff"}
 
 
+def parse_seed_points(value: str) -> tuple[tuple[float, float], ...]:
+    """Parse browser/CLI seed coordinates written as ``x,y;x,y``."""
+
+    points: list[tuple[float, float]] = []
+    for chunk in value.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = [part.strip() for part in chunk.split(",")]
+        if len(parts) != 2:
+            raise argparse.ArgumentTypeError(
+                "Seed points must use x,y;x,y coordinates."
+            )
+        try:
+            x_px, y_px = (float(part) for part in parts)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                "Seed point coordinates must be numbers."
+            ) from exc
+        if not math.isfinite(x_px) or not math.isfinite(y_px):
+            raise argparse.ArgumentTypeError("Seed point coordinates must be finite.")
+        points.append((x_px, y_px))
+    if not points:
+        raise argparse.ArgumentTypeError("At least one seed point is required.")
+    return tuple(points)
+
+
 def parse_frame_ranges(value: str) -> tuple[tuple[int, int], ...]:
     ranges: list[tuple[int, int]] = []
     for chunk in value.split(","):
@@ -173,6 +200,27 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=2,
         help="Number of particles to click in each camera view.",
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        help=(
+            "Confirmed recording frame rate. When supplied, output tables include "
+            "time_s = frame / fps. No frame rate is guessed when this is omitted."
+        ),
+    )
+    parser.add_argument(
+        "--front-seeds",
+        type=parse_seed_points,
+        help=(
+            "Front-camera crop-local particle positions as x,y;x,y. When both "
+            "front and side seeds are supplied, the graphical seed windows are skipped."
+        ),
+    )
+    parser.add_argument(
+        "--side-seeds",
+        type=parse_seed_points,
+        help="Side-camera crop-local particle positions as x,y;x,y.",
     )
     parser.add_argument(
         "--front-focus-box",
@@ -404,24 +452,31 @@ def main() -> int:
     print_focus_summary(front_focus_roi, side_focus_roi)
     print(f"Focus box mode: {args.focus_box_mode}")
 
-    front_seed_points = interactive_particle_seeds_masked(
-        video_path=video_path,
-        camera_name="front",
-        channel=args.channel,
-        roi=front_roi,
-        seed_frame=args.seed_frame,
-        particle_count=args.particle_count,
-        focus_roi=front_focus_roi,
-    )
-    side_seed_points = interactive_particle_seeds_masked(
-        video_path=video_path,
-        camera_name="side",
-        channel=args.channel,
-        roi=side_roi,
-        seed_frame=args.seed_frame,
-        particle_count=args.particle_count,
-        focus_roi=side_focus_roi,
-    )
+    if args.front_seeds is not None:
+        front_seed_points = list(args.front_seeds)
+        side_seed_points = list(args.side_seeds)
+        validate_seed_points_in_focus(front_seed_points, front_focus_roi, "front")
+        validate_seed_points_in_focus(side_seed_points, side_focus_roi, "side")
+        print("Using particle seed coordinates supplied by Video Analysis Studio.")
+    else:
+        front_seed_points = interactive_particle_seeds_masked(
+            video_path=video_path,
+            camera_name="front",
+            channel=args.channel,
+            roi=front_roi,
+            seed_frame=args.seed_frame,
+            particle_count=args.particle_count,
+            focus_roi=front_focus_roi,
+        )
+        side_seed_points = interactive_particle_seeds_masked(
+            video_path=video_path,
+            camera_name="side",
+            channel=args.channel,
+            roi=side_roi,
+            seed_frame=args.seed_frame,
+            particle_count=args.particle_count,
+            focus_roi=side_focus_roi,
+        )
 
     background_path = resolve_background_path(args)
     background_frame = read_background_frame(background_path, args.background_frame)
@@ -485,6 +540,10 @@ def main() -> int:
     )
 
     tracks_3d = combine_camera_tracks(front_tracks, side_tracks, geometry, args.z_source)
+    if args.fps is not None:
+        front_tracks = add_time_seconds(front_tracks, args.fps)
+        side_tracks = add_time_seconds(side_tracks, args.fps)
+        tracks_3d = add_time_seconds(tracks_3d, args.fps)
     if args.max_jump_mm > 0:
         tracks_3d = filter_large_3d_jumps(tracks_3d, args.max_jump_mm)
     tracks_3d = add_tracker_smoothing(
@@ -510,6 +569,23 @@ def main() -> int:
         z_pairing_report=z_pairing_report,
         calibration_path=calibration_path,
         video_path=video_path,
+        background_path=background_path,
+        fps=args.fps,
+        seed_frame=args.seed_frame,
+        front_seed_points=front_seed_points,
+        side_seed_points=side_seed_points,
+        tracker_settings={
+            "channel": args.channel,
+            "difference_mode": args.difference_mode,
+            "background_frame": args.background_frame,
+            "focus_box_mode": args.focus_box_mode,
+            "search_radius_px": args.search_radius_px,
+            "threshold_fraction": args.threshold_fraction,
+            "min_difference": args.min_difference,
+            "memory_frames": args.memory,
+            "max_frames": args.max_frames,
+            "max_jump_mm": args.max_jump_mm,
+        },
         smooth_window=args.smooth_window,
         smooth_polyorder=args.smooth_polyorder,
     )
@@ -537,6 +613,19 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--seed-frame must be zero or positive.")
     if args.particle_count <= 0:
         raise SystemExit("--particle-count must be positive.")
+    if args.fps is not None and args.fps <= 0:
+        raise SystemExit("--fps must be positive.")
+    if (args.front_seeds is None) != (args.side_seeds is None):
+        raise SystemExit("--front-seeds and --side-seeds must be supplied together.")
+    if args.front_seeds is not None:
+        if len(args.front_seeds) != args.particle_count:
+            raise SystemExit(
+                "--front-seeds must contain exactly --particle-count coordinates."
+            )
+        if len(args.side_seeds) != args.particle_count:
+            raise SystemExit(
+                "--side-seeds must contain exactly --particle-count coordinates."
+            )
     if args.search_radius_px <= 0:
         raise SystemExit("--search-radius-px must be positive.")
     if not 0 < args.threshold_fraction <= 1:
@@ -617,6 +706,12 @@ def open_video(video_path: Path):
             "PIMS is required. Install dependencies with "
             "`\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt`."
         ) from exc
+    if not video_path.suffix:
+        # Some experimental recordings (notably New Deets/SP6) are valid
+        # Matroska files stored without an extension. PIMS' automatic loader
+        # dispatch relies on the filename, while its PyAV reader can inspect
+        # the container directly without renaming the immutable source.
+        return pims.PyAVReaderTimed(str(video_path))
     return pims.open(str(video_path))
 
 
@@ -728,7 +823,7 @@ def is_image_file(path: Path) -> bool:
 
 
 def is_video_file(path: Path) -> bool:
-    return path.suffix.lower() in VIDEO_EXTENSIONS
+    return path.suffix.lower() in VIDEO_EXTENSIONS or (not path.suffix and path.is_file())
 
 
 def frame_to_gray(
@@ -2313,6 +2408,18 @@ def add_overlap_tags(
     return tagged
 
 
+def add_time_seconds(tracks: pd.DataFrame, fps: float) -> pd.DataFrame:
+    """Add measured-frame time without altering any coordinate columns."""
+
+    timed = tracks.copy()
+    values = timed["frame"].astype(float) / float(fps)
+    if "time_s" in timed.columns:
+        timed["time_s"] = values
+    else:
+        timed.insert(timed.columns.get_loc("frame") + 1, "time_s", values)
+    return timed
+
+
 def write_outputs(
     output_dir: Path,
     geometry: ChamberGeometry,
@@ -2326,6 +2433,12 @@ def write_outputs(
     z_pairing_report: dict[str, object],
     calibration_path: Path,
     video_path: Path,
+    background_path: Path,
+    fps: float | None,
+    seed_frame: int,
+    front_seed_points: list[tuple[float, float]],
+    side_seed_points: list[tuple[float, float]],
+    tracker_settings: dict[str, object],
     smooth_window: int,
     smooth_polyorder: int,
 ) -> None:
@@ -2358,7 +2471,18 @@ def write_outputs(
                 },
                 "video": str(video_path.resolve()),
                 "video_id": infer_video_id(video_path),
+                "background": str(background_path.resolve()),
                 "calibration_file_used": str(calibration_path.resolve()),
+                "created_at": datetime.now().astimezone().isoformat(),
+                "fps": None if fps is None else float(fps),
+                "seed_frame": int(seed_frame),
+                "front_seed_points_px": [list(point) for point in front_seed_points],
+                "side_seed_points_px": [list(point) for point in side_seed_points],
+                "frame_range": {
+                    "first": int(tracks_3d["frame"].min()),
+                    "last": int(tracks_3d["frame"].max()),
+                },
+                "tracker_settings": tracker_settings,
                 "front_points": int(len(front_tracks)),
                 "side_points": int(len(side_tracks)),
                 "tracks_3d_points": int(len(tracks_3d)),

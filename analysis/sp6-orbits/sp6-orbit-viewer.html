@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SP6 orbit viewer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111f;
+      --panel: #0d1b2d;
+      --panel-2: #10243a;
+      --text: #e6f1ff;
+      --muted: #94a8bd;
+      --border: #29425d;
+      --orbit: #45e09d;
+      --quiet: #65a9ff;
+      --transition: #ffc857;
+      --unknown: #7f8a99;
+      --temperature: #ff7a66;
+      --error: #ff7f8d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 25% 0%, #112d49 0, var(--bg) 38rem);
+      color: var(--text);
+      font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(1500px, calc(100% - 28px)); margin: 0 auto; padding: 28px 0 60px; }
+    h1, h2, h3 { margin: 0; line-height: 1.15; font-weight: 650; }
+    h1 { font-size: clamp(28px, 4vw, 48px); letter-spacing: -0.035em; }
+    h2 { margin-top: 34px; font-size: 24px; }
+    h3 { font-size: 16px; }
+    p { margin: 8px 0; }
+    a { color: #8cc8ff; }
+    code { color: #c5e6ff; }
+    .lede { max-width: 900px; color: var(--muted); font-size: 17px; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 22px 0 14px; }
+    .stat, .panel {
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .stat { padding: 13px 15px; }
+    .stat span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .stat strong { display: block; margin-top: 2px; font-size: 22px; font-variant-numeric: tabular-nums; }
+    .stat small { color: var(--muted); }
+    .warning { border-left: 4px solid var(--transition); background: #2a2417; padding: 10px 13px; margin: 14px 0 20px; border-radius: 5px; }
+    .viewer-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(390px, 1fr); gap: 14px; align-items: start; }
+    .panel { padding: 12px; }
+    .video-shell { position: relative; overflow: hidden; border-radius: 8px; background: #000; aspect-ratio: 16 / 9; }
+    video { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button, select {
+      min-height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 6px 10px;
+      font: inherit;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: #5d7c9d; }
+    button:focus-visible, select:focus-visible { outline: 3px solid #66b6ff; outline-offset: 2px; }
+    .mode-pill { margin-left: auto; padding: 6px 10px; border-radius: 999px; font-weight: 650; }
+    .mode-orbit { color: #052b1c; background: var(--orbit); }
+    .mode-quiet { color: #071a31; background: var(--quiet); }
+    .mode-transition { color: #322300; background: var(--transition); }
+    .mode-unknown { color: #15191e; background: var(--unknown); }
+    .canvas-title { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 7px; }
+    .canvas-title span { color: var(--muted); font-size: 12px; }
+    canvas.chart { display: block; width: 100%; background: #071421; border-radius: 7px; }
+    #path3dCanvas { height: 350px; cursor: grab; touch-action: none; }
+    #path3dCanvas:active { cursor: grabbing; }
+    #timelineCanvas { height: 112px; cursor: crosshair; margin-top: 10px; }
+    #signalCanvas { height: 290px; }
+    .view-controls { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; align-items: center; }
+    .view-controls span { color: var(--muted); font-size: 12px; margin-right: 2px; }
+    .view-controls button { min-height: 30px; padding: 3px 8px; font-size: 12px; }
+    .view-controls button[aria-pressed="true"] { border-color: var(--orbit); color: var(--orbit); }
+    .path-legend { display: flex; flex-wrap: wrap; gap: 11px; margin: 7px 0 10px; color: var(--muted); font-size: 12px; }
+    .path-legend i { display: inline-block; width: 13px; height: 3px; margin-right: 5px; vertical-align: middle; }
+    .live-readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .live-value { min-width: 0; padding: 8px 9px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .live-value:nth-child(3n) { border-right: 0; }
+    .live-value:nth-last-child(-n + 3) { border-bottom: 0; }
+    .live-value span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .055em; }
+    .live-value strong { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .live-data-title { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-top: 12px; }
+    .live-data-title span { color: var(--muted); font-size: 11px; }
+    .nearby-table { margin-top: 5px; font-size: 12px; }
+    .nearby-table th, .nearby-table td { padding: 5px 6px; }
+    .nearby-table tr.current-row { background: color-mix(in srgb, var(--orbit) 17%, transparent); }
+    .nearby-table tbody tr { cursor: pointer; }
+    .nearby-table tbody tr:hover { background: color-mix(in srgb, var(--quiet) 13%, transparent); }
+    .sync-note { color: var(--muted); font-size: 12px; margin: 7px 0 0; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; margin-top: 7px; }
+    .legend i { display: inline-block; width: 13px; height: 4px; margin-right: 5px; vertical-align: middle; border-radius: 3px; }
+    .jump-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .jump-grid button { text-align: left; min-height: 72px; }
+    .jump-grid strong, .jump-grid span { display: block; }
+    .jump-grid span { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .section-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 14px; margin-top: 12px; }
+    .pipeline { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; margin: 14px 0; }
+    .step { position: relative; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-height: 104px; }
+    .step b { display: block; color: #9cd4ff; margin-bottom: 4px; }
+    .step span { color: var(--muted); font-size: 12px; }
+    .step:not(:last-child)::after { content: "→"; position: absolute; right: -9px; top: 40%; color: #67809a; z-index: 2; }
+    .checks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; margin-top: 12px; }
+    .check { background: #0b2130; border-left: 3px solid var(--orbit); padding: 9px 10px; border-radius: 5px; }
+    .check b { display: block; font-variant-numeric: tabular-nums; }
+    .check span { color: var(--muted); font-size: 12px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-variant-numeric: tabular-nums; }
+    th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-size: 12px; }
+    .note { color: var(--muted); font-size: 13px; }
+    .uncertainty-list { margin: 8px 0 0; padding-left: 20px; }
+    .uncertainty-list li { margin: 7px 0; }
+    .downloads { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .downloads a { display: inline-block; border: 1px solid var(--border); padding: 7px 10px; border-radius: 7px; text-decoration: none; background: var(--panel-2); }
+    @media (max-width: 980px) {
+      .viewer-grid, .section-grid { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .pipeline { grid-template-columns: repeat(2, 1fr); }
+      .step:not(:last-child)::after { display: none; }
+    }
+    @media (max-width: 580px) {
+      main { width: min(100% - 16px, 1500px); padding-top: 16px; }
+      .stats, .jump-grid, .checks { grid-template-columns: 1fr; }
+      .mode-pill { margin-left: 0; }
+      #path3dCanvas { height: 320px; }
+      .live-readout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .live-value:nth-child(3n) { border-right: 1px solid var(--border); }
+      .live-value:nth-child(2n) { border-right: 0; }
+      .live-value:nth-last-child(-n + 3) { border-bottom: 1px solid var(--border); }
+      .live-value:nth-last-child(-n + 2) { border-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SP6 circular-motion viewer</h1>
+    <p class="lede">Play the unobstructed experiment while the synchronized CSV row and reconstructed 3D trajectory update beside it.</p>
+  </header>
+
+  <section class="stats" aria-label="Measured mode summary">
+    <div class="stat"><span>Orbit frequency</span><strong id="frequencyStat">—</strong><small>episode-to-episode 1σ</small></div>
+    <div class="stat"><span>Orbit period</span><strong id="periodStat">—</strong><small>episode-to-episode 1σ</small></div>
+    <div class="stat"><span>Orbit radius</span><strong id="radiusStat">—</strong><small>episode-to-episode 1σ</small></div>
+    <div class="stat"><span>Burst recurrence</span><strong id="recurrenceStat">—</strong><small>temperature cycle shown below</small></div>
+  </section>
+
+  <div class="warning"><strong>Calibration limitation:</strong> frequency, period, timing, and direction are robust. Absolute millimeter positions carry an additional unknown systematic uncertainty because the original SP6 calibration file is missing. The front/side vertical reconstructions differ by about <span id="zOffset">—</span>.</div>
+
+  <section class="viewer-grid">
+    <div class="panel">
+      <div class="canvas-title"><h2 style="margin:0">Original video</h2><span>clean footage; tracking is shown beside it</span></div>
+      <div class="video-shell">
+        <video id="video" controls preload="metadata" src="video/SP6.mp4"></video>
+      </div>
+      <div class="toolbar">
+        <button id="previousEpisode" type="button">Previous orbit</button>
+        <button id="nextEpisode" type="button">Next orbit</button>
+        <label for="episodeSelect">Episode</label>
+        <select id="episodeSelect" aria-label="Jump to circular episode"></select>
+        <span id="modePill" class="mode-pill mode-unknown" aria-live="polite">Untracked</span>
+      </div>
+      <canvas id="timelineCanvas" class="chart" role="img" aria-label="Clickable full-video timeline showing circular, transition, quiet, and untracked intervals"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--orbit)"></i>circular</span>
+        <span><i style="background:var(--transition)"></i>boundary uncertainty</span>
+        <span><i style="background:var(--quiet)"></i>quiet/weak motion</span>
+        <span><i style="background:var(--unknown)"></i>not reliably tracked</span>
+        <span><i style="background:var(--temperature)"></i>bottom temperature</span>
+      </div>
+      <div class="jump-grid" aria-label="Representative motion types">
+        <button type="button" data-jump="195"><strong>Circular orbit</strong><span>Large, phase-coherent 1.94 Hz motion</span></button>
+        <button type="button" data-jump="218"><strong>Quiet/weak motion</strong><span>Residual amplitude near 0.057 mm</span></button>
+        <button type="button" data-jump="185.5"><strong>Transition</strong><span>Episode boundary depends on threshold</span></button>
+      </div>
+    </div>
+
+    <div class="panel" aria-label="Synchronized CSV data and reconstructed path">
+      <div class="canvas-title"><h2 style="margin:0">Reconstructed path</h2><span id="pathDetail">waiting for video</span></div>
+      <div class="view-controls" aria-label="Trajectory view">
+        <span>View</span>
+        <button type="button" data-view="3d" aria-pressed="true">3D</button>
+        <button type="button" data-view="xy" aria-pressed="false">XY</button>
+        <button type="button" data-view="xz" aria-pressed="false">XZ</button>
+        <button type="button" data-view="yz" aria-pressed="false">YZ</button>
+        <span>Drag the plot to rotate</span>
+      </div>
+      <canvas id="path3dCanvas" class="chart" role="img" aria-label="Interactive 3D reconstruction of the particle path synchronized to the video"></canvas>
+      <div class="path-legend">
+        <span><i style="background:var(--muted)"></i>selected interval</span>
+        <span><i style="background:var(--orbit)"></i>last one-period path</span>
+        <span><i style="background:var(--transition)"></i>center-to-particle radius</span>
+        <span><i style="background:var(--text);height:7px;width:7px;border-radius:50%"></i>current position</span>
+      </div>
+
+      <div class="live-readout">
+        <div class="live-value"><span>Video time</span><strong id="videoTimeValue">—</strong></div>
+        <div class="live-value"><span>CSV time / frame</span><strong id="csvTimeValue">—</strong></div>
+        <div class="live-value"><span>CSV row</span><strong id="csvRowValue">—</strong></div>
+        <div class="live-value"><span>Raw XYZ</span><strong id="rawPositionValue">—</strong></div>
+        <div class="live-value"><span>Smoothed XYZ</span><strong id="smoothPositionValue">—</strong></div>
+        <div class="live-value"><span>Orbit RMS radius</span><strong id="liveRadiusValue">—</strong></div>
+        <div class="live-value"><span>Episode period</span><strong id="livePeriodValue">—</strong></div>
+        <div class="live-value"><span>Bottom temperature</span><strong id="liveTemperatureValue">—</strong></div>
+        <div class="live-value"><span>Video ↔ CSV offset</span><strong id="syncOffsetValue">—</strong></div>
+      </div>
+      <p class="sync-note">Raw XYZ values are the exact nearest measured row in <code>SP6_position_time.csv</code>. The path uses the smoothed XYZ columns. Position precision is approximately ±<span id="livePrecisionValue">—</span> in XY, plus the separate calibration-scale limitation.</p>
+
+      <div class="live-data-title"><h3>Nearest CSV rows</h3><span>click a row to seek</span></div>
+      <div class="table-wrap">
+        <table class="nearby-table">
+          <thead><tr><th>Frame</th><th>Time (s)</th><th>x (mm)</th><th>y (mm)</th><th>z (mm)</th><th>r RMS</th><th>Ep.</th></tr></thead>
+          <tbody id="nearbyRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Orbit amplitude, temperature, and timing uncertainty</h2>
+    <div class="panel" style="margin-top:12px">
+      <canvas id="signalCanvas" class="chart" role="img" aria-label="Orbit RMS amplitude and bottom temperature over time with circular interval uncertainty bands"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--quiet)"></i>1–4 Hz XY RMS amplitude ± empirical coordinate precision</span>
+        <span><i style="background:var(--temperature)"></i>bottom temperature</span>
+        <span><i style="background:var(--orbit)"></i>primary 0.10 mm circular interval</span>
+        <span><i style="background:var(--transition)"></i>0.08–0.15 mm boundary range</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How the position/time CSV was produced</h2>
+    <div class="pipeline" aria-label="Tracking analysis pipeline">
+      <div class="step"><b>1. Video</b><span>Original 1920×1080 recording at 120 frames/s.</span></div>
+      <div class="step"><b>2. Background</b><span>Temporal-median background built from 41 frames.</span></div>
+      <div class="step"><b>3. Detection</b><span>Bright-particle peak found independently in front and side camera panels.</span></div>
+      <div class="step"><b>4. Linking</b><span>Nearest plausible detection followed frame-to-frame; jumps above 0.15 mm rejected.</span></div>
+      <div class="step"><b>5. Calibration</b><span>Front horizontal gives x, side horizontal gives y, and both give z.</span></div>
+      <div class="step"><b>6. Smoothing</b><span>Raw XYZ retained; separate Savitzky–Golay smoothed columns added.</span></div>
+      <div class="step"><b>7. Modes</b><span>1–4 Hz XY band, 0.5 s RMS envelope, and threshold sensitivity identify circular bursts.</span></div>
+    </div>
+    <div class="section-grid">
+      <div class="panel">
+        <h3>Independent CSV audit</h3>
+        <p>The mode analysis was rerun from the source tracker CSV with the same declared parameters. The regenerated position/time CSV matched the delivered file byte-for-byte.</p>
+        <div class="checks">
+          <div class="check"><b id="rowCheck">—</b><span>measured rows</span></div>
+          <div class="check"><b id="duplicateCheck">—</b><span>duplicate frames</span></div>
+          <div class="check"><b id="timestampCheck">—</b><span>maximum frame/time mismatch</span></div>
+          <div class="check"><b id="gapCheck">—</b><span>largest gap; analysis-only interpolation</span></div>
+          <div class="check"><b id="missingCheck">—</b><span>missing XYZ rows</span></div>
+          <div class="check"><b id="hashCheck">—</b><span>independent rerun checksum</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>What the columns mean</h3>
+        <ul class="uncertainty-list">
+          <li><code>x_mm, y_mm, z_mm</code>: calibrated measurements retained without smoothing.</li>
+          <li><code>x_smooth_mm, y_smooth_mm, z_smooth_mm</code>: trajectory used for mode analysis.</li>
+          <li><code>orbit_band_*</code>: 1–4 Hz component used to isolate the fast orbit.</li>
+          <li><code>orbit_rms_mm</code>: 0.5 s XY RMS envelope.</li>
+          <li><code>circular_episode</code>: primary 0.10 mm threshold classification.</li>
+          <li><code>bottom_temperature_c</code>: 1 Hz graph trace interpolated to video time.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Uncertainty and error bands</h2>
+    <div class="section-grid">
+      <div class="panel">
+        <ul class="uncertainty-list" id="uncertaintyList"></ul>
+      </div>
+      <div class="panel">
+        <h3>Interpretation</h3>
+        <p><strong>Random precision</strong> is estimated from robust raw-minus-smoothed residuals. It measures short-term tracking scatter, not full calibration accuracy.</p>
+        <p><strong>Episode variability</strong> is the standard deviation across the seven orbit bursts and includes real physical changes as well as measurement noise.</p>
+        <p><strong>Boundary uncertainty</strong> comes from rerunning the detector at 0.08, 0.10, and 0.15 mm RMS thresholds. It is shown in amber.</p>
+        <p><strong>Systematic error</strong> remains in the absolute position scale because the original SP6 calibration is unavailable. It cannot honestly be converted into a finite confidence interval from this video alone.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Episode measurements</h2>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>Episode</th><th>Primary interval (s)</th><th>Possible start (s)</th><th>Possible end (s)</th><th>Frequency (Hz)</th><th>Period (s)</th><th>Radius (mm)</th><th>Circularity</th></tr></thead>
+        <tbody id="episodeRows"></tbody>
+      </table>
+    </div>
+    <p class="note">Possible start/end ranges show the 0.08–0.15 mm threshold sensitivity. Frequency, period, and radius uncertainties in the summary use variation across all seven episodes.</p>
+  </section>
+
+  <section>
+    <h2>Files</h2>
+    <div class="downloads">
+      <a href="data/SP6_position_time.csv">Position/time CSV</a>
+      <a href="data/SP6_circular_intervals.csv">Circular intervals CSV</a>
+      <a href="data/SP6_uncertainty_audit.json">Uncertainty and audit JSON</a>
+      <a href="simulator/ThermophoreticLevitationSimulator.html">Fitted simulator</a>
+      <a href="README.md">Analysis README</a>
+    </div>
+  </section>
+</main>
+
+<script src="orbit_data.js"></script>
+<script>
+(() => {
+  "use strict";
+  const D = window.SP6_DATA;
+  const video = document.getElementById("video");
+  const timeline = document.getElementById("timelineCanvas");
+  const pathCanvas = document.getElementById("path3dCanvas");
+  const signalCanvas = document.getElementById("signalCanvas");
+  const tracks = D.tracks;
+  const samples = D.samples;
+  const episodes = D.episodes;
+  const U = D.uncertainty;
+  const A = D.audit;
+  const css = getComputedStyle(document.documentElement);
+  const colors = {
+    orbit: css.getPropertyValue("--orbit").trim(),
+    quiet: css.getPropertyValue("--quiet").trim(),
+    transition: css.getPropertyValue("--transition").trim(),
+    unknown: css.getPropertyValue("--unknown").trim(),
+    temperature: css.getPropertyValue("--temperature").trim(),
+    error: css.getPropertyValue("--error").trim(),
+    text: css.getPropertyValue("--text").trim(),
+    muted: css.getPropertyValue("--muted").trim(),
+    border: css.getPropertyValue("--border").trim()
+  };
+
+  const field = Object.fromEntries(D.trackFields.map((name, index) => [name, index]));
+  const value = (row, name) => row[field[name]];
+  const sampleField = Object.fromEntries(D.sampleFields.map((name, index) => [name, index]));
+  const sampleValue = (row, name) => row[sampleField[name]];
+  const fmt = (number, digits) => Number(number).toFixed(digits);
+
+  document.getElementById("frequencyStat").textContent = `${fmt(U.frequencyMeanHz, 3)} ± ${fmt(U.frequencyEpisodeSigmaHz, 3)} Hz`;
+  document.getElementById("periodStat").textContent = `${fmt(U.periodMeanS, 3)} ± ${fmt(U.periodEpisodeSigmaS, 3)} s`;
+  document.getElementById("radiusStat").textContent = `${fmt(U.radiusMeanMm, 3)} ± ${fmt(U.radiusEpisodeSigmaMm, 3)} mm`;
+  document.getElementById("recurrenceStat").textContent = `${fmt(U.recurrenceMeanS, 2)} ± ${fmt(U.recurrenceSigmaS, 2)} s`;
+  document.getElementById("zOffset").textContent = `${fmt(U.stereoZOffsetMedianMm, 3)} ± ${fmt(U.stereoZOffsetScatterSigmaMm, 3)} mm`;
+
+  document.getElementById("rowCheck").textContent = A.row_count.toLocaleString();
+  document.getElementById("duplicateCheck").textContent = String(A.duplicate_frames);
+  document.getElementById("timestampCheck").textContent = `${A.max_timestamp_vs_frame_error_s.toExponential(1)} s`;
+  document.getElementById("gapCheck").textContent = `${A.maximum_frame_gap} frames`;
+  document.getElementById("missingCheck").textContent = String(A.missing_raw_xyz_rows + A.missing_smoothed_xyz_rows);
+  document.getElementById("hashCheck").textContent = A.independent_rerun_exact_match ? "Exact match" : "Mismatch";
+
+  document.getElementById("uncertaintyList").innerHTML = [
+    `<strong>Frequency:</strong> ${fmt(U.frequencyMeanHz, 3)} ± ${fmt(U.frequencyEpisodeSigmaHz, 3)} Hz (1σ across episodes); mean 95% CI ±${fmt(U.frequencyMean95CiHalfHz, 3)} Hz.`,
+    `<strong>Period:</strong> ${fmt(U.periodMeanS, 3)} ± ${fmt(U.periodEpisodeSigmaS, 3)} s (1σ across episodes).`,
+    `<strong>Radius:</strong> ${fmt(U.radiusMeanMm, 3)} ± ${fmt(U.radiusEpisodeSigmaMm, 3)} mm (1σ across episode medians).`,
+    `<strong>Short-term coordinate precision proxy:</strong> σx=${fmt(U.coordinateRandomSigmaMm.x * 1000, 1)} µm, σy=${fmt(U.coordinateRandomSigmaMm.y * 1000, 1)} µm, σz=${fmt(U.coordinateRandomSigmaMm.z * 1000, 1)} µm.`,
+    `<strong>Two-camera z diagnostic:</strong> median disagreement ${fmt(U.stereoZOffsetMedianMm, 3)} mm with robust scatter ${fmt(U.stereoZOffsetScatterSigmaMm, 3)} mm. The large median is treated as systematic calibration offset.`,
+    `<strong>Recurrence:</strong> ${fmt(U.recurrenceMeanS, 2)} ± ${fmt(U.recurrenceSigmaS, 2)} s versus temperature ${fmt(U.temperatureCycleMeanS, 2)} ± ${fmt(U.temperatureCycleSigmaS, 2)} s.`
+  ].map(text => `<li>${text}</li>`).join("");
+
+  const select = document.getElementById("episodeSelect");
+  select.innerHTML = episodes.map(ep => `<option value="${ep.episode}">Episode ${ep.episode}: ${fmt(ep.start,1)}–${fmt(ep.end,1)} s</option>`).join("");
+  select.addEventListener("change", () => seekToEpisode(Number(select.value)));
+
+  document.getElementById("episodeRows").innerHTML = episodes.map(ep => `
+    <tr>
+      <td>${ep.episode}</td>
+      <td>${fmt(ep.start,3)}–${fmt(ep.end,3)}</td>
+      <td>${fmt(ep.possibleStartMin,3)}–${fmt(ep.possibleStartMax,3)}</td>
+      <td>${fmt(ep.possibleEndMin,3)}–${fmt(ep.possibleEndMax,3)}</td>
+      <td>${fmt(ep.frequency,3)}</td>
+      <td>${fmt(ep.period,3)}</td>
+      <td>${fmt(ep.radius,3)}</td>
+      <td>${fmt(ep.circularity,3)}</td>
+    </tr>`).join("");
+
+  function seekTo(time) {
+    video.currentTime = Math.max(0, Math.min(D.duration, time));
+    drawAll();
+  }
+  function seekToEpisode(number) {
+    const ep = episodes.find(item => item.episode === number) || episodes[0];
+    seekTo(ep.start + 1.0);
+  }
+  document.querySelectorAll("[data-jump]").forEach(button => button.addEventListener("click", () => seekTo(Number(button.dataset.jump))));
+  document.getElementById("previousEpisode").addEventListener("click", () => {
+    const current = video.currentTime;
+    const previous = [...episodes].reverse().find(ep => ep.start < current - 1);
+    seekToEpisode(previous ? previous.episode : episodes[0].episode);
+  });
+  document.getElementById("nextEpisode").addEventListener("click", () => {
+    const current = video.currentTime;
+    const next = episodes.find(ep => ep.start > current + 1);
+    seekToEpisode(next ? next.episode : episodes[episodes.length - 1].episode);
+  });
+
+  function nearestIndex(time) {
+    let low = 0, high = tracks.length - 1;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (value(tracks[middle], "time") < time) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0 && Math.abs(value(tracks[low - 1], "time") - time) < Math.abs(value(tracks[low], "time") - time)) return low - 1;
+    return low;
+  }
+
+  function nearestSampleIndex(time) {
+    let low = 0, high = samples.length - 1;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (sampleValue(samples[middle], "time") < time) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0 && Math.abs(sampleValue(samples[low - 1], "time") - time) < Math.abs(sampleValue(samples[low], "time") - time)) return low - 1;
+    return low;
+  }
+
+  function stateAt(time) {
+    if (time < D.reliableTrackingStart) return {kind: "unknown", label: "Not reliably tracked", episode: null};
+    const primary = episodes.find(ep => time >= ep.start && time <= ep.end);
+    if (primary) return {kind: "orbit", label: `Circular orbit ${primary.episode}`, episode: primary};
+    const transition = episodes.find(ep => time >= ep.possibleStartMin && time <= ep.possibleEndMax);
+    if (transition) return {kind: "transition", label: `Transition near orbit ${transition.episode}`, episode: transition};
+    return {kind: "quiet", label: "Quiet / weak oscillation", episode: null};
+  }
+
+  function setModePill(state) {
+    const pill = document.getElementById("modePill");
+    pill.className = `mode-pill mode-${state.kind}`;
+    pill.textContent = state.label;
+    if (state.episode) select.value = String(state.episode.episode);
+  }
+
+  const sampleIndexesByEpisode = new Map(episodes.map(ep => [ep.episode, []]));
+  samples.forEach((row, index) => {
+    const episode = sampleValue(row, "episode");
+    if (sampleIndexesByEpisode.has(episode)) sampleIndexesByEpisode.get(episode).push(index);
+  });
+  let viewYaw = -0.72, viewPitch = 0.56;
+  let dragging = false, lastPointerX = 0, lastPointerY = 0;
+
+  function setTrajectoryView(name) {
+    const views = {
+      "3d": [-0.72, 0.56],
+      "xy": [0, 0],
+      "xz": [0, -Math.PI / 2],
+      "yz": [-Math.PI / 2, -Math.PI / 2]
+    };
+    [viewYaw, viewPitch] = views[name] || views["3d"];
+    document.querySelectorAll("[data-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.view === name)));
+    draw3D();
+  }
+  document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => setTrajectoryView(button.dataset.view)));
+
+  pathCanvas.addEventListener("pointerdown", event => {
+    dragging = true; lastPointerX = event.clientX; lastPointerY = event.clientY;
+    pathCanvas.setPointerCapture(event.pointerId);
+  });
+  pathCanvas.addEventListener("pointermove", event => {
+    if (!dragging) return;
+    viewYaw += (event.clientX - lastPointerX) * 0.012;
+    viewPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, viewPitch + (event.clientY - lastPointerY) * 0.012));
+    lastPointerX = event.clientX; lastPointerY = event.clientY;
+    document.querySelectorAll("[data-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.view === "3d")));
+    draw3D();
+  });
+  pathCanvas.addEventListener("pointerup", () => { dragging = false; });
+  pathCanvas.addEventListener("pointercancel", () => { dragging = false; });
+  document.getElementById("nearbyRows").addEventListener("click", event => {
+    const row = event.target.closest("tr[data-time]");
+    if (row) seekTo(Number(row.dataset.time));
+  });
+
+  function setLiveText(id, text) {
+    document.getElementById(id).textContent = text;
+  }
+
+  function updateInspector() {
+    const time = video.currentTime || 0;
+    const state = stateAt(time);
+    setModePill(state);
+    setLiveText("videoTimeValue", `${fmt(time, 3)} s`);
+    if (time < sampleValue(samples[0], "time") || time > sampleValue(samples[samples.length - 1], "time")) {
+      ["csvTimeValue", "csvRowValue", "rawPositionValue", "smoothPositionValue", "liveRadiusValue", "livePeriodValue", "liveTemperatureValue", "syncOffsetValue"].forEach(id => setLiveText(id, "not tracked"));
+      document.getElementById("nearbyRows").innerHTML = '<tr><td colspan="7">No reliable measured row at this video time.</td></tr>';
+      document.getElementById("pathDetail").textContent = state.label;
+      return;
+    }
+    const index = nearestSampleIndex(time), row = samples[index];
+    const csvTime = sampleValue(row, "time");
+    const period = state.episode ? state.episode.period : null;
+    setLiveText("csvTimeValue", `${fmt(csvTime, 4)} s / ${sampleValue(row, "frame")}`);
+    setLiveText("csvRowValue", `${(index + 2).toLocaleString()}`);
+    setLiveText("rawPositionValue", `${fmt(sampleValue(row, "xRawMm"), 5)}, ${fmt(sampleValue(row, "yRawMm"), 5)}, ${fmt(sampleValue(row, "zRawMm"), 5)} mm`);
+    setLiveText("smoothPositionValue", `${fmt(sampleValue(row, "xMm"), 5)}, ${fmt(sampleValue(row, "yMm"), 5)}, ${fmt(sampleValue(row, "zMm"), 5)} mm`);
+    setLiveText("liveRadiusValue", `${fmt(sampleValue(row, "orbitRmsMm"), 4)} mm`);
+    setLiveText("livePeriodValue", period ? `${fmt(period, 4)} s (${fmt(1 / period, 3)} Hz)` : "not in orbit");
+    setLiveText("liveTemperatureValue", `${fmt(sampleValue(row, "temperatureC"), 3)} °C`);
+    const offsetMs = (csvTime - time) * 1000;
+    setLiveText("syncOffsetValue", `${offsetMs >= 0 ? "+" : ""}${fmt(offsetMs, 2)} ms`);
+    setLiveText("livePrecisionValue", `σx ${fmt(U.coordinateRandomSigmaMm.x * 1000, 1)} µm, σy ${fmt(U.coordinateRandomSigmaMm.y * 1000, 1)} µm`);
+    document.getElementById("pathDetail").textContent = state.episode
+      ? `${state.label} · T=${fmt(period, 3)} s · R=${fmt(state.episode.radius, 3)} mm`
+      : `${state.label} · local 5 s path`;
+
+    const first = Math.max(0, index - 2), last = Math.min(samples.length - 1, index + 2);
+    const rows = [];
+    for (let rowIndex = first; rowIndex <= last; rowIndex++) {
+      const item = samples[rowIndex];
+      rows.push(`<tr class="${rowIndex === index ? "current-row" : ""}" data-time="${sampleValue(item, "time")}">
+        <td>${sampleValue(item, "frame")}</td><td>${fmt(sampleValue(item, "time"), 4)}</td>
+        <td>${fmt(sampleValue(item, "xRawMm"), 5)}</td><td>${fmt(sampleValue(item, "yRawMm"), 5)}</td><td>${fmt(sampleValue(item, "zRawMm"), 5)}</td>
+        <td>${fmt(sampleValue(item, "orbitRmsMm"), 4)}</td><td>${sampleValue(item, "episode") || "—"}</td></tr>`);
+    }
+    document.getElementById("nearbyRows").innerHTML = rows.join("");
+  }
+
+  function draw3D() {
+    const {ctx, width: w, height: h} = canvasContext(pathCanvas, pathCanvas.clientHeight || 350);
+    ctx.clearRect(0, 0, w, h);
+    const time = video.currentTime || 0;
+    if (time < sampleValue(samples[0], "time") || time > sampleValue(samples[samples.length - 1], "time")) {
+      ctx.fillStyle = colors.muted; ctx.font = "14px system-ui"; ctx.textAlign = "center";
+      ctx.fillText("Tracking begins at 57.0 s", w / 2, h / 2); ctx.textAlign = "left";
+      return;
+    }
+    const currentIndex = nearestSampleIndex(time), state = stateAt(time);
+    let indexes;
+    if (state.episode) {
+      indexes = sampleIndexesByEpisode.get(state.episode.episode);
+    } else {
+      const first = nearestSampleIndex(Math.max(sampleValue(samples[0], "time"), time - 2.5));
+      const last = nearestSampleIndex(Math.min(sampleValue(samples[samples.length - 1], "time"), time + 2.5));
+      indexes = Array.from({length: last - first + 1}, (_, offset) => first + offset);
+    }
+    const stride = Math.max(1, Math.ceil(indexes.length / 1600));
+    const plotted = indexes.filter((_, index) => index % stride === 0 || index === indexes.length - 1);
+    const center = state.episode ? state.episode.center : ["xMm", "yMm", "zMm"].map(name => indexes.reduce((sum, index) => sum + sampleValue(samples[index], name), 0) / indexes.length);
+    const local = index => [sampleValue(samples[index], "xMm") - center[0], sampleValue(samples[index], "yMm") - center[1], sampleValue(samples[index], "zMm") - center[2]];
+    let extent = 0;
+    plotted.forEach(index => local(index).forEach(component => { extent = Math.max(extent, Math.abs(component)); }));
+    extent = Math.max(extent, 0.08);
+    const scale = Math.min(w, h) * 0.38 / extent;
+    const cosY = Math.cos(viewYaw), sinY = Math.sin(viewYaw), cosP = Math.cos(viewPitch), sinP = Math.sin(viewPitch);
+    const project = point => {
+      const rotatedX = cosY * point[0] - sinY * point[1];
+      const rotatedY = sinY * point[0] + cosY * point[1];
+      const screenY = cosP * rotatedY - sinP * point[2];
+      const depth = sinP * rotatedY + cosP * point[2];
+      return [w / 2 + rotatedX * scale, h / 2 - screenY * scale, depth];
+    };
+    const drawPath = (pathIndexes, stroke, width, alpha) => {
+      if (!pathIndexes.length) return;
+      ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.globalAlpha = alpha; ctx.beginPath();
+      pathIndexes.forEach((index, order) => { const point = project(local(index)); if (order === 0) ctx.moveTo(point[0], point[1]); else ctx.lineTo(point[0], point[1]); });
+      ctx.stroke(); ctx.globalAlpha = 1;
+    };
+
+    const origin = project([0, 0, 0]);
+    const axisLength = extent * 0.58;
+    [["x", [axisLength,0,0], colors.temperature], ["y", [0,axisLength,0], colors.orbit], ["z", [0,0,axisLength], colors.quiet]].forEach(([label, vector, color]) => {
+      const end = project(vector); ctx.strokeStyle = color; ctx.globalAlpha = .8; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(origin[0], origin[1]); ctx.lineTo(end[0], end[1]); ctx.stroke();
+      ctx.fillStyle = color; ctx.font = "12px system-ui"; ctx.fillText(label, end[0] + 4, end[1] - 3);
+    });
+    ctx.globalAlpha = 1;
+    drawPath(plotted, colors.muted, 1.2, .56);
+    const period = state.episode ? state.episode.period : U.periodMeanS;
+    const trailIndexes = plotted.filter(index => sampleValue(samples[index], "time") >= time - period && sampleValue(samples[index], "time") <= time);
+    drawPath(trailIndexes, colors[state.kind], 3.0, 1);
+
+    const currentPoint = project(local(currentIndex));
+    if (state.episode) {
+      ctx.strokeStyle = colors.transition; ctx.lineWidth = 1.5; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(origin[0], origin[1]); ctx.lineTo(currentPoint[0], currentPoint[1]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = colors.transition; ctx.beginPath(); ctx.arc(origin[0], origin[1], 3, 0, Math.PI * 2); ctx.fill();
+    }
+    const uncertaintyRadius = Math.max(4, 2 * Math.hypot(U.coordinateRandomSigmaMm.x, U.coordinateRandomSigmaMm.y) * scale);
+    ctx.strokeStyle = colors.error; ctx.globalAlpha = .7; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(currentPoint[0], currentPoint[1], uncertaintyRadius, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = colors.text; ctx.beginPath(); ctx.arc(currentPoint[0], currentPoint[1], 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = colors.muted; ctx.font = "11px system-ui"; ctx.textAlign = "left";
+    ctx.fillText(`centered coordinates · span ±${fmt(extent, 2)} mm`, 10, h - 10);
+  }
+
+  function canvasContext(canvas, height) {
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(300, canvas.getBoundingClientRect().width);
+    canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+    const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {ctx, width, height};
+  }
+
+  function drawTimeline() {
+    const {ctx, width: w, height: h} = canvasContext(timeline, 112);
+    const left = 42, right = 12, top = 15, bandH = 30, plotW = w - left - right;
+    const x = time => left + time / D.duration * plotW;
+    ctx.fillStyle = "#12283a"; ctx.fillRect(left, top, plotW, bandH);
+    ctx.fillStyle = colors.unknown; ctx.globalAlpha = .55; ctx.fillRect(left, top, x(D.reliableTrackingStart) - left, bandH); ctx.globalAlpha = 1;
+    episodes.forEach(ep => {
+      ctx.fillStyle = colors.transition; ctx.globalAlpha = .5; ctx.fillRect(x(ep.possibleStartMin), top, x(ep.possibleEndMax) - x(ep.possibleStartMin), bandH);
+      ctx.fillStyle = colors.orbit; ctx.globalAlpha = .9; ctx.fillRect(x(ep.start), top + 5, x(ep.end) - x(ep.start), bandH - 10);
+    });
+    ctx.globalAlpha = 1;
+    const tempMin = 95, tempMax = 99.2, tempY0 = 57, tempH = 30;
+    ctx.strokeStyle = colors.temperature; ctx.lineWidth = 1.5; ctx.beginPath();
+    D.temperature.forEach((row, index) => {
+      const xx = x(row[0]), yy = tempY0 + tempH - (row[1] - tempMin) / (tempMax - tempMin) * tempH;
+      if (index === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+    }); ctx.stroke();
+    ctx.fillStyle = colors.muted; ctx.font = "11px system-ui"; ctx.textAlign = "center";
+    [0,60,120,180,240,300,343].forEach(t => { const xx=x(t); ctx.fillText(`${t}s`,xx,h-6); ctx.strokeStyle="rgba(140,168,190,.18)"; ctx.beginPath();ctx.moveTo(xx,top);ctx.lineTo(xx,h-22);ctx.stroke(); });
+    const currentX = x(video.currentTime || 0); ctx.strokeStyle = colors.text; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(currentX, 6); ctx.lineTo(currentX, h - 20); ctx.stroke();
+    ctx.textAlign = "left";
+  }
+
+  timeline.addEventListener("click", event => {
+    const rect = timeline.getBoundingClientRect();
+    const fraction = Math.max(0, Math.min(1, (event.clientX - rect.left - 42) / (rect.width - 54)));
+    seekTo(fraction * D.duration);
+  });
+
+  function drawSignals() {
+    const {ctx, width:w, height:h}=canvasContext(signalCanvas,290);const m={left:58,right:58,top:18,bottom:42},pw=w-m.left-m.right,ph=h-m.top-m.bottom;
+    const x=t=>m.left+t/D.duration*pw, yR=r=>m.top+ph-r/.42*ph, yT=t=>m.top+ph-(t-95)/(99.2-95)*ph;
+    ctx.strokeStyle=colors.border;ctx.strokeRect(m.left,m.top,pw,ph);
+    episodes.forEach(ep=>{ctx.fillStyle=colors.transition;ctx.globalAlpha=.13;ctx.fillRect(x(ep.possibleStartMin),m.top,x(ep.possibleEndMax)-x(ep.possibleStartMin),ph);ctx.fillStyle=colors.orbit;ctx.globalAlpha=.11;ctx.fillRect(x(ep.start),m.top,x(ep.end)-x(ep.start),ph);});ctx.globalAlpha=1;
+    const radialSigma=Math.hypot(U.coordinateRandomSigmaMm.x,U.coordinateRandomSigmaMm.y);
+    ctx.fillStyle="rgba(101,169,255,.16)";ctx.beginPath();tracks.forEach((row,i)=>{const xx=x(value(row,"time")),yy=yR(Math.min(.42,value(row,"orbitRmsMm")+radialSigma));if(i===0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});for(let i=tracks.length-1;i>=0;i--){const row=tracks[i];ctx.lineTo(x(value(row,"time")),yR(Math.max(0,value(row,"orbitRmsMm")-radialSigma)));}ctx.closePath();ctx.fill();
+    ctx.strokeStyle=colors.quiet;ctx.lineWidth=1.4;ctx.beginPath();tracks.forEach((row,i)=>{const xx=x(value(row,"time")),yy=yR(value(row,"orbitRmsMm"));if(i===0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});ctx.stroke();
+    ctx.strokeStyle=colors.temperature;ctx.lineWidth=1.4;ctx.beginPath();D.temperature.forEach((row,i)=>{const xx=x(row[0]),yy=yT(row[1]);if(i===0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);});ctx.stroke();
+    ctx.strokeStyle="rgba(255,255,255,.55)";ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(m.left,yR(.1));ctx.lineTo(m.left+pw,yR(.1));ctx.stroke();ctx.setLineDash([]);
+    const currentX=x(video.currentTime||0);ctx.strokeStyle=colors.text;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(currentX,m.top);ctx.lineTo(currentX,m.top+ph);ctx.stroke();
+    ctx.fillStyle=colors.muted;ctx.font="11px system-ui";ctx.textAlign="center";[0,60,120,180,240,300,343].forEach(t=>ctx.fillText(`${t}`,x(t),h-18));ctx.fillText("video time [s]",m.left+pw/2,h-3);
+    ctx.textAlign="right";[0,.1,.2,.3,.4].forEach(r=>ctx.fillText(r.toFixed(1),m.left-8,yR(r)+4));ctx.textAlign="left";[95,96,97,98,99].forEach(t=>ctx.fillText(`${t}°`,m.left+pw+8,yT(t)+4));
+    ctx.save();ctx.translate(14,m.top+ph/2);ctx.rotate(-Math.PI/2);ctx.textAlign="center";ctx.fillText("orbit RMS [mm]",0,0);ctx.restore();
+  }
+
+  function drawAll(){updateInspector();draw3D();drawTimeline();drawSignals();}
+  video.addEventListener("loadedmetadata",()=>{seekTo(57.5);drawAll();});
+  video.addEventListener("timeupdate",drawAll);video.addEventListener("seeked",drawAll);video.addEventListener("play",drawAll);video.addEventListener("pause",drawAll);
+  window.addEventListener("resize",drawAll);
+  if("requestVideoFrameCallback" in HTMLVideoElement.prototype){let lastDraw=0;const step=now=>{if(!video.paused&&now-lastDraw>=32){drawAll();lastDraw=now;}video.requestVideoFrameCallback(step);};video.requestVideoFrameCallback(step);}else{setInterval(()=>{if(!video.paused)drawAll();},40);}
+  drawAll();
+})();
+</script>
+</body>
+</html>

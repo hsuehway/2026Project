@@ -5,9 +5,12 @@ Thumbs.db
 **/__pycache__/
 *.py[cod]
 **/.venv/
+**/.venv-*/
 **/.pytest_cache/
 **/.mypy_cache/
 **/.ruff_cache/
+**/.matplotlib-cache/
+**/.matplotlib_cache/
 
 # Local editor and OS state
 .vscode/
@@ -19,4 +22,29 @@ Thumbs.db
 !**/.env.example
 **/*.pem
 **/*.key
+
+# Raw experimental evidence stays local or in dedicated research-data storage.
+Gianni Levitation File/
+Gianni Levitation File 2/
+
+# Generated and derived artifacts are reproducible but not source code.
+derived-data/*
+!derived-data/README.md
+generated/*
+!generated/README.md
+archive/*
+!archive/README.md
+analysis/*/data/
+analysis/*/figures/
+analysis/*/reference/
+analysis/*/results/
+analysis/*/simulator/
+analysis/*/tracking_verification/
+analysis/*/video/
+analysis/*/orbit_data.js
+
+# Local sessions, review assets, and nested tool state.
+**/.*_session.json
+**/.codex_docx_review/
+**/tmp/
 

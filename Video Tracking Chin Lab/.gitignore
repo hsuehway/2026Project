@@ -12,3 +12,9 @@ outputs_bubble_shapes/
 .translational_force_studio_session.json
 .video_analysis_studio_session.json
 .sp_trajectory_studio_session.json
+
+# Browser-imported raw media remain local and outside normal Git history.
+Videos/imported/
+Backgrounds/imported/
+calibrations/
+SP6_online-video-cutter.com_20260831_114256/

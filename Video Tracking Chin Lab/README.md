@@ -33,6 +33,16 @@ To launch without keeping a terminal window open, double-click:
 Launch Video Analysis Studio.cmd
 ```
 
+On macOS, double-click:
+
+```text
+Launch Video Analysis Studio.command
+```
+
+The macOS launcher uses `.venv-macos` when it is available and otherwise uses
+`python3`. The first launch may require macOS to approve opening the local
+launcher. Keep the launcher window open while using the Studio.
+
 The equivalent command is:
 
 ```powershell
@@ -41,24 +51,93 @@ The equivalent command is:
 
 The studio opens one local browser tab and provides:
 
+- separate Home, Setup, Track, Review, and Results pages so the workflow remains
+  digestible as more analysis controls are added;
+- a recommended-next-action banner and a pre-flight checklist that explain what
+  is missing before a long tracking run can start;
+- local browser import for videos and background media, with imported raw files
+  excluded from normal Git history and a SHA-256 provenance manifest saved in
+  `outputs_background/import_manifests/`;
+- media-metadata inspection so the recording frame rate can be confirmed rather
+  than guessed;
+- in-browser front/side particle clicks after a calibration has been selected or
+  created;
+- direct support for extensionless Matroska recordings such as `New Deets/SP6`;
 - automatic MI/SP matching for videos, backgrounds, and calibrations;
 - background-subtraction preview settings and captured output paths;
 - background-subtraction tracking with the existing seed and correction windows;
-- raw/smoothed tracking verification and optional identity review;
+- automatic raw/smoothed tracking verification over the original camera video,
+  plus optional identity review;
 - one-click translational finishing: motion, state vectors, and overlays;
 - one-click rotational finishing: motion, rotation estimation, combined reduced
   state vectors, and the final full-state overlay;
 - a combined finish that calculates motion once and produces both overlay families;
+- an integrated trajectory workspace with MP4 playback, projection plots, CSV
+  previews, downloads, and descriptive track-health metrics;
+- a Results workspace that can import a position-versus-time CSV and optional
+  companion video, run the circular-motion detector, and display a synchronized
+  interactive report with video, timeline, XY/XZ/YZ path views, live CSV values,
+  episode statistics, diagnostic plots, derived time series, and downloads
+  without leaving the Studio;
+- the complete SP6 synchronized orbit viewer as an embedded case study, including
+  the video, nearest measured rows, interactive 3-D path, temperature trace,
+  interval sensitivity, and uncertainty notes;
+- an enforced raw-first review sequence: create the raw detector overlay,
+  confirm that it follows the visible particle, and only then render the
+  smoothed overlay or derive motion;
+- per-file run provenance and recent-run history so restored outputs are clearly
+  identified as saved results rather than work rerun when the Studio opens;
 - persistent job logs, cancellation, local session autosave, and in-tab MP4 playback;
 - resume fields for outputs that were already created with the original scripts.
 
-Use **Test selected frames** while tuning subtraction settings, then use
+Use **Test a short preview** while tuning subtraction settings, then use
 **Render full preview** before building the final overlays.
+
+For a new recording, select or import the video, confirm the detected frame
+rate, and choose a background. If there is no run-specific calibration yet,
+click **Create calibration & test preview** and complete the guided camera-panel
+and plate-point windows. Then load the calibrated camera views in the Studio,
+click each particle in the same order in both views, and click **Track + create
+overlay**. The Review section can display and download `tracks_3d.csv`,
+trajectory plots and overlays, motion tables, and state-vector CSV files without
+requiring separate command-line steps.
+
+The Track Health panel is intentionally descriptive: it reports coverage,
+missing frames, front/side vertical disagreement, frame-to-frame step size, and
+chamber inclusion. It does not declare scientific pass/fail until a documented,
+dataset-specific threshold system is established. Always review the trajectory
+overlay before accepting or deriving motion from a track.
+
+The Review page explains each artifact. In particular, the raw detector overlay
+contains unsmoothed coordinates after the optional maximum-jump filter; it is not
+the untouched pre-filter point set. Set maximum jump to `0` when a comparison
+that retains every reconstructed point is required. Smoothing is Savitzky–Golay
+post-processing, is saved alongside raw coordinates, and never repairs gaps or
+identity mistakes.
+
+Studio tracking supplies the confirmed frame rate to the tracker, so its CSV
+tables include `time_s` alongside `frame` and the raw `x_mm`, `y_mm`, and `z_mm`
+measurements. Command-line tracking remains backward compatible: when `--fps`
+is omitted, no time column is invented.
 
 The studio pauses for the original graphical interaction windows when a script
 requires calibration points, focus boxes, particle seeds, lost-track corrections,
 or identity decisions. Closing or completing that interaction returns control to
 the same browser workflow. Generated paths are carried forward automatically.
+
+On the Results page, click **Use current tracked CSV** to analyze the active
+tracking output, or import another analyzer CSV. The detector recognizes common
+`time_s`/`frame` and `x_mm`/`y_mm` column names; other schemas can be mapped in
+the page. A confirmed frame rate is required only when the CSV has frames but no
+time column. Multi-particle files require a particle ID. Every run is written to
+`outputs_background/orbit_results/` with a source checksum, settings, run
+manifest, interval CSV, derived time-series CSV, JSON summary, plots, and HTML
+report. When a companion video is supplied, the report synchronizes playback to
+the analysis time basis; confirm that the video and CSV share the same time zero.
+Matroska inputs are remuxed losslessly to a derived MP4 beside the report so
+browser playback does not depend on MKV support; the video frames are not
+re-encoded.
+The source CSV and companion video are never modified.
 
 ## Translational Force Studio
 

@@ -11,6 +11,11 @@ collections:
   six-degree-of-freedom simulation components.
 - `Gianni Levitation File/` and `Gianni Levitation File 2/`: raw experimental
   media archives. These may be intentionally untracked because of their size.
+- `analysis/`: maintained, reproducible analysis code; run-specific data and
+  generated figures remain ignored unless a storage decision is documented.
+- `reference/`: small supplied reference implementations and theory documents.
+- `derived-data/`, `generated/`, and `archive/`: local artifacts that are not
+  part of normal Git history.
 
 Read `PROJECT_CONTEXT.md` and the closest directory-level `AGENTS.md` before
 changing code. The more specific file adds to or overrides this file.

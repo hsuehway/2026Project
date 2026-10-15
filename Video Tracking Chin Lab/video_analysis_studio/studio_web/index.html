@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Particle Motion Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div>
+          <p class="eyebrow">CHIN LAB · LOCAL ANALYSIS</p>
+          <h1>Particle Motion Studio</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="saveStatus" class="save-status">Saved locally</span>
+        <span id="serverStatus" class="status-pill"><i></i> Ready</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" data-page-section="home">
+        <div>
+          <span class="hero-kicker"><i></i> Scientific video analysis workspace</span>
+          <h2>See the motion.<br><em>Trust the track.</em></h2>
+          <p>Move from synchronized camera footage to reviewable 3-D trajectories, diagnostic overlays, and state vectors—all without leaving the browser.</p>
+          <div class="hero-chips"><span>Dual-camera tracking</span><span>Raw-first validation</span><span>Reproducible outputs</span></div>
+        </div>
+        <div class="hero-console" aria-label="Decorative trajectory preview">
+          <div class="console-bar"><span><i></i> ANALYZER READY</span><small>LOCAL</small></div>
+          <div class="console-screen">
+            <svg viewBox="0 0 420 220" role="img" aria-label="Stylized particle trajectory">
+              <defs><linearGradient id="trail" x1="0" x2="1"><stop stop-color="#56e7c3" stop-opacity="0"/><stop offset=".45" stop-color="#56e7c3"/><stop offset="1" stop-color="#8a7dff"/></linearGradient></defs>
+              <path d="M18 171 C72 175,79 88,132 113 S211 187,252 112 S318 39,400 60" fill="none" stroke="url(#trail)" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="400" cy="60" r="8" fill="#8a7dff"/><circle cx="400" cy="60" r="18" fill="none" stroke="#8a7dff" stroke-opacity=".45"/>
+              <path d="M400 36v48M376 60h48" stroke="#dcd8ff" stroke-width="1" stroke-opacity=".7"/>
+            </svg>
+            <span class="console-axis x">X</span><span class="console-axis y">Y</span>
+            <div class="console-readout"><span>FRAME</span><b>06,920</b><span>TRACK</span><b>P0</b></div>
+          </div>
+          <div class="local-note"><span aria-hidden="true">⌂</span><div><strong>Private by design</strong><small>Videos and results stay on this Mac.</small></div></div>
+        </div>
+      </section>
+
+      <nav class="stepper page-navigation" aria-label="Studio pages">
+        <button class="step-tab active" data-page-target="home"><b>⌂</b><span>Home<small>Status &amp; next action</small></span></button>
+        <button class="step-tab" data-page-target="setup"><b>1</b><span>Setup<small>Source &amp; conditions</small></span></button>
+        <button class="step-tab" data-page-target="track"><b>2</b><span>Track<small>Initialize &amp; detect</small></span></button>
+        <button class="step-tab" data-page-target="review"><b>3</b><span>Review<small>Raw → smooth → export</small></span></button>
+        <button class="step-tab" data-page-target="results"><b>4</b><span>Results<small>Orbits &amp; reports</small></span></button>
+      </nav>
+
+      <details class="instruction-drawer" data-page-section="home">
+        <summary><span><b>How to use this analyzer</b><small>Follow these steps in order</small></span><span class="instruction-toggle">Hide</span></summary>
+        <ol class="instruction-strip">
+          <li><button data-page-target="setup"><b>1</b><span><strong>Import video</strong><small>Choose or upload the recording.</small></span></button></li>
+          <li><button data-page-target="setup"><b>2</b><span><strong>Confirm setup</strong><small>FPS, background, and calibration.</small></span></button></li>
+          <li><button data-page-target="track"><b>3</b><span><strong>Mark particle</strong><small>Click it in front and side views.</small></span></button></li>
+          <li><button data-page-target="track"><b>4</b><span><strong>Test and track</strong><small>Preview first, then create raw tracks.</small></span></button></li>
+          <li><button data-page-target="review"><b>5</b><span><strong>Review raw</strong><small>Verify the marker follows the particle.</small></span></button></li>
+          <li><button data-page-target="review"><b>6</b><span><strong>Smooth and export</strong><small>Only after accepting the raw result.</small></span></button></li>
+          <li><button data-page-target="results"><b>7</b><span><strong>Analyze modes</strong><small>Detect circular episodes and inspect the report.</small></span></button></li>
+        </ol>
+      </details>
+
+      <section id="nextAction" class="next-action" aria-live="polite" data-page-section="home">
+        <span class="next-action-icon">→</span>
+        <div><p class="eyebrow">RECOMMENDED NEXT</p><b id="nextActionTitle">Choose a source video</b><small id="nextActionDetail">The Studio will preserve the original and inspect its metadata.</small></div>
+        <button id="nextActionButton" class="button secondary" data-scroll-target="sourceCard">Go to source</button>
+      </section>
+
+      <section id="homeDashboard" class="home-dashboard" data-page-section="home">
+        <article class="home-panel session-panel">
+          <div><p class="eyebrow">CURRENT WORKSPACE</p><h3 id="homeTrialTitle">No recording selected</h3><p id="sessionOrigin">The Studio has not loaded any saved results.</p></div>
+          <button class="button ghost" data-page-target="review">Open saved results</button>
+        </article>
+        <div class="home-grid">
+          <article class="home-panel"><p class="eyebrow">WORKFLOW</p><h3>One decision at a time</h3><ol class="compact-steps"><li><b>Setup</b><span>Confirm source, frame rate, background, and calibration.</span></li><li><b>Track</b><span>Mark particles and create unsmoothed coordinates.</span></li><li><b>Review raw</b><span>Verify that the detector stays on the visible particle.</span></li><li><b>Smooth &amp; derive</b><span>Only after raw review, calculate motion and state vectors.</span></li></ol></article>
+          <article class="home-panel"><div class="panel-title-row"><div><p class="eyebrow">RECENT RUNS</p><h3>Where results came from</h3></div></div><div id="recentRuns" class="recent-runs"><p class="muted-copy">No completed runs yet.</p></div></article>
+        </div>
+      </section>
+
+      <div id="globalNotice" class="notice hidden" role="status"></div>
+
+      <section class="page-masthead" data-page-section="setup">
+        <div><span class="page-index">01 / INPUT</span><h2>Define the experiment.</h2><p>Choose the source evidence and confirm the physical context before any tracking begins.</p></div>
+        <div class="masthead-stat"><span>Required</span><b>Video · FPS · Background · Calibration</b></div>
+      </section>
+
+      <section id="sourceCard" class="workflow-card" data-page-section="setup">
+        <div class="card-heading">
+          <div class="step-number">1</div>
+          <div><p class="eyebrow">SOURCE</p><h3>Choose the recording</h3><p>The original file is never edited. Imported copies are stored locally and excluded from Git.</p></div>
+          <span id="sourceCheck" class="check-badge">Waiting</span>
+        </div>
+
+        <div class="source-grid">
+          <div class="source-main">
+            <label for="videoLibrary">Video recording</label>
+            <div class="input-combo">
+              <select id="videoLibrary"><option value="">Choose a project video…</option></select>
+              <label class="button secondary upload-button">Import video<input id="videoUpload" type="file" hidden></label>
+            </div>
+            <div id="uploadProgressWrap" class="upload-progress hidden"><span id="uploadProgress"></span></div>
+            <input id="videoPath" class="path-input" type="text" placeholder="Or paste the full path to a video on this Mac" autocomplete="off">
+
+            <div id="videoMeta" class="metadata-strip muted">
+              <span><b>—</b><small>resolution</small></span><span><b>—</b><small>duration</small></span><span><b>—</b><small>frames</small></span><span><b>—</b><small>codec</small></span>
+            </div>
+          </div>
+
+          <aside class="conditions-panel">
+            <h4>Run conditions</h4>
+            <div class="field-grid two">
+              <label>Run name<input id="trialName" type="text" placeholder="e.g. MI10"></label>
+              <label>Particles<input id="particleCount" type="number" min="1" max="20" value="1"></label>
+              <label>Frame rate <span class="unit">fps</span><input id="fps" type="number" min="0.001" step="any" placeholder="Required"></label>
+              <label>Seed frame<input id="seedFrame" type="number" min="0" step="1" value="1"></label>
+            </div>
+            <p id="fpsEvidence" class="field-help warning-text">Frame rate must come from media metadata or a confirmed experiment record.</p>
+          </aside>
+        </div>
+
+        <div class="supporting-files">
+          <div>
+            <div class="label-row"><label for="backgroundLibrary">Background</label><label class="switch"><input id="useVideoBackground" type="checkbox"><span></span>Use a frame from this video</label></div>
+            <select id="backgroundLibrary"><option value="">Choose a project background…</option></select>
+            <label class="inline-upload button ghost">Import background<input id="backgroundUpload" type="file" accept="video/*,image/*" hidden></label>
+            <input id="backgroundPath" class="path-input" type="text" placeholder="Background image or video path">
+          </div>
+          <div>
+            <div class="label-row"><label for="calibrationLibrary">Calibration</label><span class="optional">Can be created in Preview</span></div>
+            <select id="calibrationLibrary"><option value="">Choose a calibration…</option></select>
+            <input id="calibrationPath" class="path-input" type="text" placeholder="Calibration JSON path">
+            <p id="companionEvidence" class="field-help hidden"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-masthead" data-page-section="track">
+        <div><span class="page-index">02 / DETECT</span><h2>Initialize. Detect. Reconstruct.</h2><p>Mark particle identities once, test the signal, then build synchronized 3-D trajectories.</p></div>
+        <div class="masthead-stat"><span>Current method</span><b>Background subtraction</b></div>
+      </section>
+
+      <nav class="section-tabs" aria-label="Tracking tasks" data-page-section="track">
+        <button class="section-tab active" data-subview-target="initialize" data-subview-group="track"><span>1</span><b>Initialize particles</b><small>Load views and place markers</small></button>
+        <button class="section-tab" data-subview-target="run" data-subview-group="track"><span>2</span><b>Run tracking</b><small>Pre-flight, detect, and reconstruct</small></button>
+      </nav>
+
+      <section id="seedCard" class="workflow-card" data-page-section="track" data-subview-group="track" data-subview="initialize">
+        <div class="card-heading">
+          <div class="step-number">2</div>
+          <div><p class="eyebrow">INITIALIZE</p><h3>Show the analyzer where each particle starts</h3><p>Click particles in the same order in both views. Markers with the same number become one 3-D identity.</p></div>
+          <span id="seedCheck" class="check-badge">Waiting</span>
+        </div>
+
+        <div id="calibrationPrompt" class="callout">
+          <div><strong>Need camera regions or calibration?</strong><p>Run a short preview. The Studio will open guided calibration windows, save the result, and return here.</p></div>
+          <button class="button secondary" data-action="preview">Create calibration &amp; test preview</button>
+        </div>
+
+        <div class="seed-toolbar">
+          <label>Frame <input id="seedFrameMirror" type="number" min="0" step="1" value="1"></label>
+          <button id="loadSeedFrames" class="button secondary">Load camera views</button>
+          <button id="clearSeeds" class="button ghost">Clear markers</button>
+          <span id="seedCounter" class="seed-counter">0 / 0 marked</span>
+        </div>
+
+        <div class="camera-grid">
+          <article class="camera-panel">
+            <header><div><span class="camera-dot front"></span><b>Front camera</b></div><small>x and z position</small></header>
+            <div class="canvas-wrap"><canvas id="frontCanvas" width="640" height="360" aria-label="Front camera seed frame"></canvas><div class="canvas-empty">Load a calibrated frame to begin</div></div>
+            <code id="frontSeeds">No particle markers</code>
+          </article>
+          <article class="camera-panel">
+            <header><div><span class="camera-dot side"></span><b>Side camera</b></div><small>y and z position</small></header>
+            <div class="canvas-wrap"><canvas id="sideCanvas" width="640" height="360" aria-label="Side camera seed frame"></canvas><div class="canvas-empty">Load a calibrated frame to begin</div></div>
+            <code id="sideSeeds">No particle markers</code>
+          </article>
+        </div>
+
+        <div class="action-row">
+          <button class="button secondary action-button" data-action="preview"><span>Test a short preview</span><small>Checks subtraction and seed placement on a short segment.</small></button>
+          <button class="button ghost action-button" data-action="preview_full"><span>Render a full preview</span><small>Creates a full-length subtraction video without tracking.</small></button>
+        </div>
+      </section>
+
+      <section id="trackCard" class="workflow-card accent-card" data-page-section="track" data-subview-group="track" data-subview="run">
+        <div class="card-heading">
+          <div class="step-number">3</div>
+          <div><p class="eyebrow">TRACK</p><h3>Build the trajectory</h3><p>Raw measurements are preserved. Smoothed positions are added as separate columns and never cross missing-frame gaps.</p></div>
+          <span id="trackCheck" class="check-badge">Ready when initialized</span>
+        </div>
+        <div id="readinessPanel" class="readiness-panel">
+          <div class="readiness-head"><div><p class="eyebrow">PRE-FLIGHT CHECK</p><h4 id="readinessTitle">Complete setup to enable tracking</h4></div><span id="readinessCount">0 / 6 ready</span></div>
+          <div id="readinessList" class="readiness-list"></div>
+        </div>
+        <div class="track-actions action-grid">
+          <button class="button primary large action-button" data-action="track" data-overlay-source="raw"><span><i aria-hidden="true">▶</i> Track + raw review overlay</span><small>Finds the particle, exports 3-D coordinates, then shows the detector’s unsmoothed position over the original video.</small></button>
+          <button class="button secondary action-button" data-page-target="review"><span>Review existing trajectory</span><small>Open saved raw/smoothed overlays, trajectory plots, diagnostics, and exports.</small></button>
+          <button class="button secondary action-button" data-action="review_identities"><span>Review particle identities</span><small>Inspect and correct identity swaps in multi-particle recordings.</small></button>
+        </div>
+        <p class="tracking-note">Full tracking can take several minutes. The job panel shows <b>Step 1 of 2: tracking</b>, followed by <b>Step 2 of 2: overlay rendering</b>. Results appear when both finish.</p>
+        <div class="quality-grid">
+          <div><b>Raw coordinates</b><span>x_mm · y_mm · z_mm</span></div>
+          <div><b>Diagnostics</b><span>gaps · jumps · z agreement</span></div>
+          <div><b>Reproducible output</b><span>settings · calibration · source</span></div>
+        </div>
+      </section>
+
+      <details class="advanced-card" data-page-section="track" data-subview-group="track" data-subview="run">
+        <summary><span><b>Advanced tracking controls</b><small>Subtraction, search, smoothing, identity, overlays, and rotation</small></span><span class="chevron">⌄</span></summary>
+        <div class="advanced-content">
+          <fieldset><legend>Subtraction &amp; search</legend><div class="field-grid four">
+            <label>Channel<select data-bind="shared.channel"><option>green</option><option>red</option><option>blue</option><option>mean</option></select></label>
+            <label>Difference<select data-bind="shared.difference_mode"><option>abs</option><option>bright</option><option>dark</option></select></label>
+            <label>Background frame<input data-bind="shared.background_frame" type="number" min="0"></label>
+            <label>Search radius <span class="unit">px</span><input data-bind="shared.search_radius_px" type="number" min="1"><small class="control-help">Searches around the previous position. Larger tolerates faster motion but can select another feature.</small></label>
+            <label>Search growth after miss <span class="unit">px/frame</span><input data-bind="tracking.missing_search_expansion_px" type="number" min="0" step="0.1"><small class="control-help">Expands the search after each consecutive missed frame.</small></label>
+            <label>Threshold fraction<input data-bind="shared.threshold_fraction" type="number" min="0.001" max="1" step="0.01"><small class="control-help">Fraction of the local peak retained as the particle blob.</small></label>
+            <label>Minimum difference<input data-bind="shared.min_difference" type="number" min="0" step="0.1"><small class="control-help">Minimum background-change intensity required for a detection.</small></label>
+            <label>Track memory <span class="unit">frames</span><input data-bind="shared.memory" type="number" min="0"><small class="control-help">Keeps identity alive during misses; it does not invent positions.</small></label>
+            <label>Preview frames<input data-bind="preview.max_frames" type="number" min="1"></label>
+          </div></fieldset>
+          <fieldset><legend>Focus &amp; trajectory</legend><div class="field-grid four">
+            <label class="check-label"><input id="useFocusBox" type="checkbox"> Select/use focus boxes</label>
+            <label>Focus mode<select data-bind="shared.focus_box_mode"><option>follow</option><option>hard</option><option>seed-only</option></select></label>
+            <label>Front focus box<input data-bind="shared.front_focus_box" placeholder="x,y,width,height"></label>
+            <label>Side focus box<input data-bind="shared.side_focus_box" placeholder="x,y,width,height"></label>
+            <label>Maximum frames<input data-bind="tracking.max_frames" type="number" min="1" placeholder="All"></label>
+            <label>Maximum jump <span class="unit">mm/frame</span><input data-bind="tracking.max_jump_mm" type="number" min="0" step="0.01"><small class="control-help">Removes large steps before “raw” 3-D rows are saved. Use 0 to preserve all detections.</small></label>
+            <label>Smoothing window <span class="unit">odd frames</span><input data-bind="tracking.smooth_window" type="number" min="0" step="2"><small class="control-help">Savitzky–Golay window. At 120 fps, 7 frames span 58 ms. Use 0 or 1 to disable.</small></label>
+            <label>Polynomial order<input data-bind="tracking.smooth_polyorder" type="number" min="0"><small class="control-help">Local curve order; must be smaller than the smoothing window.</small></label>
+            <label>Vertical z source<select data-bind="tracking.z_source"><option>average</option><option>front</option><option>side</option></select><small class="control-help">Average is default; inspect camera z disagreement before accepting it.</small></label>
+            <label>Manual review after misses<input data-bind="tracking.manual_correction_after_misses" type="number" min="1"><small class="control-help">Opens correction after this many consecutive misses.</small></label>
+            <label class="check-label"><input data-bind="tracking.no_manual_correction" type="checkbox"> Disable manual correction prompts</label>
+          </div></fieldset>
+          <fieldset><legend>Identity &amp; derived motion</legend><div class="field-grid four">
+            <label>Identity authority<select data-bind="tracking.identity_authority"><option>auto</option><option>none</option><option>front</option><option>side</option></select></label>
+            <label>Front overlap frames<input data-bind="tracking.front_overlap_frames" placeholder="2200-2350"></label>
+            <label>Side overlap frames<input data-bind="tracking.side_overlap_frames" placeholder="2200-2350"></label>
+            <label class="check-label"><input data-bind="tracking.z_pairing_check" type="checkbox"> Check z pairing</label>
+            <label>Motion smooth window<input data-bind="motion.smooth_window" type="number" min="0" step="2"></label>
+            <label>Motion polynomial<input data-bind="motion.smooth_polyorder" type="number" min="0"></label>
+            <label>State source<select data-bind="translational.canonical_source"><option>raw</option><option>smoothed</option></select><small class="control-help">Chooses which motion becomes canonical in final state-vector exports.</small></label>
+            <label>State-vector overlay source<select data-bind="translational.overlay_source"><option>smoothed</option><option>raw</option><option>both</option></select><small class="control-help">Changes the later visualization; it does not retrack the particle.</small></label>
+            <label>Tracking overlay<select data-bind="verification.position_source"><option>raw</option><option>smoothed</option><option>both</option></select><small class="control-help">Raw must be reviewed first. Smoothed is post-processing only.</small></label>
+            <label>Overlay frame step<input data-bind="verification.frame_step" type="number" min="1" placeholder="Auto (max 60 fps)"></label>
+          </div></fieldset>
+          <fieldset><legend>Rotation</legend><div class="field-grid four">
+            <label>Crop width <span class="unit">px</span><input data-bind="rotation.crop_width_px" type="number" min="3"></label>
+            <label>Crop height <span class="unit">px</span><input data-bind="rotation.crop_height_px" type="number" min="3"></label>
+            <label>Minimum anisotropy<input data-bind="rotation.minimum_anisotropy" type="number" min="0" max="1" step="0.01"></label>
+            <label>Axes<select data-bind="rotation.axes"><option>reconstructed-3d</option><option>projected</option></select></label>
+          </div></fieldset>
+        </div>
+      </details>
+
+      <section class="page-masthead" data-page-section="review">
+        <div><span class="page-index">03 / VALIDATE</span><h2>Interrogate the result.</h2><p>Inspect raw detections frame by frame before trusting smoothing, derivatives, or physical interpretation.</p></div>
+        <div class="masthead-stat warning"><span>Review order</span><b>Raw first → Smooth second</b></div>
+      </section>
+
+      <nav class="section-tabs" aria-label="Review tasks" data-page-section="review">
+        <button class="section-tab active" data-subview-target="validate" data-subview-group="review"><span>A</span><b>Validate track</b><small>Raw overlay and diagnostics</small></button>
+        <button class="section-tab" data-subview-target="outputs" data-subview-group="review"><span>B</span><b>Derived outputs</b><small>State vectors, files, and exports</small></button>
+      </nav>
+
+      <section id="resultsCard" class="workflow-card results-card" data-page-section="review">
+        <div class="card-heading">
+          <div class="step-number">4</div>
+          <div><p class="eyebrow">TRACK REVIEW</p><h3>Inspect, validate, and export</h3><p>View trajectory media and preview CSV tables here. Every artifact remains traceable to this session.</p></div>
+          <span id="resultCheck" class="check-badge">No results yet</span>
+        </div>
+        <div id="resultsOrigin" class="results-origin" data-subview-group="review" data-subview="validate"><span>↺</span><div><b>Saved outputs</b><p>Opening this page does not rerun analysis. Each file below is labeled with the completed run that created it.</p></div></div>
+        <section class="review-protocol" aria-labelledby="reviewProtocolTitle" data-subview-group="review" data-subview="validate">
+          <div class="protocol-heading"><p class="eyebrow">REQUIRED REVIEW ORDER</p><h4 id="reviewProtocolTitle">Verify detection before smoothing</h4><p>A smooth line can conceal a bad detection. Inspect raw markers first, then explicitly confirm them before producing the smoothed review.</p></div>
+          <div class="protocol-steps">
+            <article id="rawReviewStep" class="protocol-step"><span class="protocol-number">A</span><div><h5>Raw detector overlay</h5><p>Marker positions come directly from retained detections after the maximum-jump filter. Check the entire recording for drift, reflections, jumps, and lost frames.</p><button class="button secondary" data-action="verify_tracking" data-overlay-source="raw">Create or re-render raw overlay</button></div><span id="rawOverlayStatus" class="check-badge">Not created</span></article>
+            <article id="smoothReviewStep" class="protocol-step"><span class="protocol-number">B</span><div><h5>Smoothed trajectory</h5><p>Savitzky–Golay smoothing reduces jitter but cannot repair a wrong particle identity or calibration.</p><label class="review-confirm"><input id="rawReviewAccepted" data-bind="review.raw_overlay_reviewed" type="checkbox"> I reviewed the raw overlay and the marker follows the particle.</label><label>Review note <input data-bind="review.raw_overlay_note" placeholder="Optional: frames checked, concerns, or reason accepted"></label><button id="renderSmoothOverlay" class="button primary" data-action="verify_tracking" data-overlay-source="smoothed">Render smoothed overlay</button></div><span id="smoothOverlayStatus" class="check-badge">Locked</span></article>
+          </div>
+        </section>
+        <div id="analysisWorkspace" class="analysis-workspace" data-subview-group="review" data-subview="validate">
+          <section class="result-stage">
+            <header class="result-stage-head">
+              <div><p class="eyebrow">TRAJECTORY REVIEW</p><h4 id="primaryResultTitle">Your tracked video will appear here</h4><p id="primaryResultHelp">Run tracking to compare the detected particle position with the recording.</p></div>
+              <div id="resultTabs" class="result-tabs" role="tablist"></div>
+            </header>
+            <div id="primaryResult" class="primary-result"><div class="empty-stage"><span>◎</span><b>No trajectory loaded</b><p>The overlay video, trajectory plot, and CSV can all be inspected here.</p></div></div>
+          </section>
+          <div class="analysis-sidebar">
+            <aside id="qualityPanel" class="diagnostics-panel">
+              <div class="diagnostics-heading"><p class="eyebrow">TRACK HEALTH</p><span class="diagnostic-badge neutral">Review</span></div>
+              <h4>Diagnostics appear after tracking</h4>
+              <p>These measurements help you find gaps, camera disagreement, and sudden jumps. They do not automatically prove a track is correct.</p>
+            </aside>
+            <section class="mini-plot-panel">
+              <header><div><p class="eyebrow">TRAJECTORY PLOT</p><b>Position projections</b></div><button id="openTrajectoryPlot" class="button ghost">Open</button></header>
+              <div id="miniTrajectoryPlot" class="mini-plot-empty">Available after tracking</div>
+            </section>
+          </div>
+        </div>
+        <div class="finish-actions action-grid three" data-subview-group="review" data-subview="outputs">
+          <button class="button primary action-button" data-action="translational"><span>Calculate motion &amp; state vectors</span><small>Adds velocity and acceleration using the confirmed frame rate.</small></button>
+          <button class="button secondary action-button" data-action="rotational"><span>Add rotational state</span><small>Estimates orientation and angular motion from particle image shape.</small></button>
+          <button class="button secondary action-button" data-action="both"><span>Build all final overlays</span><small>Runs translational and rotational analysis and produces final review videos.</small></button>
+        </div>
+        <details class="result-guide" data-subview-group="review" data-subview="outputs">
+          <summary><span><b>What each result means</b><small>Use this before downloading or calculating state vectors.</small></span><span class="chevron">⌄</span></summary>
+          <div class="result-glossary">
+            <div><b>Raw detector overlay</b><p>Retained, unsmoothed particle coordinates over the camera video. This is the primary tracking validity check.</p></div>
+            <div><b>Smoothed overlay</b><p>A post-processed visualization. It can reduce jitter but cannot prove the detector followed the correct particle.</p></div>
+            <div><b>3-D trajectories CSV</b><p>Frame/time, raw and smoothed positions, camera coordinates, confidence, z disagreement, and diagnostic columns.</p></div>
+            <div><b>Trajectory projections</b><p>A compact plot of the reconstructed motion. Useful for patterns and outliers, but not sufficient for frame-level validation.</p></div>
+            <div><b>Motion/state CSVs</b><p>Derived velocity, acceleration, orientation, or angular motion. These depend on confirmed FPS, calibration, and source choice.</p></div>
+            <div><b>Run manifest</b><p>Records source, settings, calibration, commands, creation time, and code revision so the output can be reproduced.</p></div>
+          </div>
+        </details>
+        <details class="resume-results" data-subview-group="review" data-subview="outputs">
+          <summary>Resume from results created earlier</summary>
+          <div class="field-grid four">
+            <label>Preview video<input data-artifact="preview_video" placeholder="Path to preview MP4"></label>
+            <label>Tracks CSV<input data-artifact="tracks_csv" placeholder="Path to tracks_3d.csv"></label>
+            <label>Motion CSV<input data-artifact="motion_csv" placeholder="Path to motion CSV"></label>
+            <label>Rotation CSV<input data-artifact="rotation_state_csv" placeholder="Path to rotation CSV"></label>
+          </div>
+          <p class="field-help">Use this only when the files came from the same source video, calibration, frame rate, and run.</p>
+        </details>
+        <details class="all-files" data-subview-group="review" data-subview="outputs">
+          <summary><span><b>All output files</b><small>View in the Studio or save a copy from this list.</small></span><span class="chevron">⌄</span></summary>
+          <div id="artifactList" class="artifact-list"><div class="empty-state"><span>⌁</span><b>Your results will appear here</b><p>Start with a short preview, then track the particles.</p></div></div>
+        </details>
+      </section>
+
+      <section class="page-masthead" data-page-section="results">
+        <div><span class="page-index">04 / RESULTS</span><h2>Measure the motion.</h2><p>Attach analyzer output, run the circular-motion detector, and inspect every derived table, plot, and report in one place.</p></div>
+        <div class="masthead-stat"><span>Detector</span><b>Band-pass amplitude + winding phase</b></div>
+      </section>
+
+      <nav class="section-tabs results-tabs" aria-label="Results tasks" data-page-section="results">
+        <button class="section-tab active" data-subview-target="analyze" data-subview-group="results"><span>1</span><b>New analysis</b><small>Import CSV and choose detector settings</small></button>
+        <button class="section-tab" data-subview-target="current" data-subview-group="results"><span>2</span><b>Current result</b><small>Summary, plots, intervals, and files</small></button>
+        <button class="section-tab" data-subview-target="sp6" data-subview-group="results"><span>★</span><b>SP6 example</b><small>Synchronized interactive case study</small></button>
+      </nav>
+
+      <section id="resultsImportCard" class="workflow-card" data-page-section="results" data-subview-group="results" data-subview="analyze">
+        <div class="card-heading">
+          <div class="step-number">5</div>
+          <div><p class="eyebrow">IMPORT</p><h3>Add analyzer results</h3><p>The source CSV and video remain unchanged. The detector writes a new, traceable output folder for every run.</p></div>
+          <span id="orbitInputCheck" class="check-badge">Choose CSV</span>
+        </div>
+
+        <div class="results-source-grid">
+          <div class="result-source-panel">
+            <div class="panel-title-row"><div><p class="eyebrow">POSITION DATA</p><h4>Analyzer CSV</h4></div><button id="useCurrentTracks" class="button ghost" type="button">Use current tracked CSV</button></div>
+            <label class="button secondary upload-button">Import CSV<input id="resultCsvUpload" type="file" accept=".csv,text/csv" hidden></label>
+            <input id="resultCsvPath" class="path-input" data-results-bind="source_csv" placeholder="Full path to position-versus-time CSV">
+            <p class="field-help">Recognizes <code>time_s</code>, or <code>frame</code> with an explicitly confirmed FPS. Raw CSV rows are never replaced.</p>
+          </div>
+          <div class="result-source-panel">
+            <div class="panel-title-row"><div><p class="eyebrow">OPTIONAL CONTEXT</p><h4>Companion video</h4></div></div>
+            <label class="button secondary upload-button">Import video<input id="resultVideoUpload" type="file" accept="video/*,.mkv" hidden></label>
+            <input id="resultVideoPath" class="path-input" data-results-bind="video_path" placeholder="Full path to the matching video">
+            <p class="field-help">Used for side-by-side review. Confirm that video time zero matches the CSV time basis.</p>
+          </div>
+        </div>
+
+        <div class="orbit-settings-grid">
+          <label>Dataset label<input data-results-bind="label" placeholder="e.g. SP6"></label>
+          <label>Particle ID <span class="optional">if multiple</span><input data-results-bind="particle" placeholder="e.g. 0"></label>
+          <label>Frame rate <span class="unit">fps</span><input data-results-bind="fps" type="number" min="0.001" step="any" placeholder="Only required without time_s"></label>
+          <label>Detection threshold<input data-results-bind="threshold" placeholder="auto or radius in position units"></label>
+          <label>Band low <span class="unit">Hz</span><input data-results-bind="band_low_hz" type="number" min="0.001" step="any"></label>
+          <label>Band high <span class="unit">Hz</span><input data-results-bind="band_high_hz" type="number" min="0.001" step="any"></label>
+          <label>Minimum episode <span class="unit">s</span><input data-results-bind="minimum_episode_s" type="number" min="0" step="any"></label>
+          <label>Merge gaps below <span class="unit">s</span><input data-results-bind="merge_gap_s" type="number" min="0" step="any"></label>
+        </div>
+
+        <details class="inline-advanced">
+          <summary>Column mapping and filter details</summary>
+          <div class="field-grid four">
+            <label>Time column<input data-results-bind="time_col" placeholder="auto"></label>
+            <label>Frame column<input data-results-bind="frame_col" placeholder="auto"></label>
+            <label>X column<input data-results-bind="x_col" placeholder="auto"></label>
+            <label>Y column<input data-results-bind="y_col" placeholder="auto"></label>
+            <label>Z column<input data-results-bind="z_col" placeholder="optional / auto"></label>
+            <label>Position unit<input data-results-bind="position_unit" placeholder="inferred from column suffix"></label>
+            <label>Smoothing window <span class="unit">s</span><input data-results-bind="smooth_window_s" type="number" min="0" step="any"></label>
+            <label>Radius window <span class="unit">s</span><input data-results-bind="radius_window_s" type="number" min="0" step="any"></label>
+            <label>Maximum short gap <span class="unit">samples</span><input data-results-bind="max_gap_samples" type="number" min="0" step="1"></label>
+          </div>
+        </details>
+
+        <div class="detector-method-note"><b>What this detects</b><span>The radius envelope identifies sustained motion in the selected frequency band. Period comes from the fitted winding rate of ellipse-normalized XY phase. Threshold sensitivity is saved with every run.</span></div>
+        <div class="action-row results-run-row">
+          <button id="runOrbitDetector" class="button primary large" data-action="orbit_analysis"><span>Run circular-motion detector</span></button>
+          <span id="orbitRunHint" class="field-help">Start with automatic thresholding, then compare the reported 0.8×, 1.0×, and 1.5× boundaries.</span>
+        </div>
+      </section>
+
+      <section id="orbitResultsCard" class="workflow-card" data-page-section="results" data-subview-group="results" data-subview="current">
+        <div class="card-heading">
+          <div class="step-number">6</div>
+          <div><p class="eyebrow">CIRCULAR MOTION</p><h3>Detector results</h3><p>Video, summary measurements, detected intervals, diagnostics, and downloadable derived data stay together.</p></div>
+          <span id="orbitResultCheck" class="check-badge">Not run</span>
+        </div>
+        <div id="orbitMetricCards" class="orbit-metric-cards">
+          <div class="orbit-metric"><span>Episodes</span><b>—</b><small>waiting for analysis</small></div>
+          <div class="orbit-metric"><span>Frequency</span><b>—</b><small>episode mean ± SD</small></div>
+          <div class="orbit-metric"><span>Period</span><b>—</b><small>episode mean ± SD</small></div>
+          <div class="orbit-metric"><span>Radius</span><b>—</b><small>episode mean ± SD</small></div>
+          <div class="orbit-metric"><span>Duty cycle</span><b>—</b><small>fraction classified as orbit</small></div>
+        </div>
+        <div id="orbitInteractiveShell" class="embedded-report-shell hidden">
+          <iframe id="orbitInteractiveFrame" title="Interactive circular-motion results" src="about:blank"></iframe>
+        </div>
+        <div class="orbit-review-grid">
+          <article class="orbit-view-panel"><header><div><p class="eyebrow">VIDEO</p><h4>Companion recording</h4></div></header><div id="orbitVideoViewer" class="orbit-media-empty">Import the matching video to review it here.</div></article>
+          <article class="orbit-view-panel"><header><div><p class="eyebrow">PATH</p><h4>Calibrated XY trajectory</h4></div></header><div id="orbitXyViewer" class="orbit-media-empty">Detected paths will appear here.</div></article>
+        </div>
+        <div class="orbit-review-grid lower">
+          <article class="orbit-view-panel"><header><div><p class="eyebrow">TIMELINE</p><h4>Detection diagnostic</h4></div><button id="openOrbitDiagnostic" class="button ghost" disabled>Open</button></header><div id="orbitDiagnosticViewer" class="orbit-media-empty">Run the detector to create the position, radius-envelope, and spectrum plot.</div></article>
+          <article class="orbit-view-panel"><header><div><p class="eyebrow">INTERVALS</p><h4>Period, radius, and quality</h4></div></header><div id="orbitIntervalsViewer" class="orbit-table-empty">The interval table will appear here.</div></article>
+        </div>
+        <details class="result-guide" open>
+          <summary><span><b>Derived time series and run files</b><small>Inspect or download every artifact created by this detector run.</small></span><span class="chevron">⌄</span></summary>
+          <div id="orbitArtifactList" class="artifact-list"><div class="empty-state"><span>○</span><b>No circular-motion run yet</b><p>Import a CSV and run the detector above.</p></div></div>
+        </details>
+      </section>
+
+      <section id="sp6CaseStudy" class="workflow-card sp6-card" data-page-section="results" data-subview-group="results" data-subview="sp6">
+        <div class="card-heading">
+          <div class="step-number">7</div>
+          <div><p class="eyebrow">SP6 CASE STUDY</p><h3>Interactive SP6 orbit report</h3><p>The complete report is embedded below: synchronized video, nearest CSV rows, interactive 3-D path, interval boundaries, temperature, uncertainty, and downloads.</p></div>
+          <a class="button secondary" href="/sp6/" target="_blank" rel="noopener">Open full screen</a>
+        </div>
+        <div class="embedded-report-shell">
+          <iframe id="sp6ReportFrame" title="SP6 circular-motion results" loading="lazy" src="about:blank" data-src="/sp6/"></iframe>
+        </div>
+      </section>
+
+      <div id="viewer" class="viewer hidden">
+        <div class="viewer-head"><div><p class="eyebrow">FILE VIEWER</p><h4 id="viewerTitle">Result</h4></div><button id="closeViewer" class="icon-button" aria-label="Close viewer">×</button></div>
+        <div id="viewerBody"></div>
+      </div>
+    </main>
+  </div>
+
+  <aside id="jobPanel" class="job-panel" aria-live="polite" aria-hidden="true">
+    <div class="job-head"><div><p class="eyebrow">RUNNING WORKFLOW</p><h3 id="jobTitle">Working…</h3></div><button id="closeJob" class="icon-button" aria-label="Hide job panel">×</button></div>
+    <div class="job-progress"><span id="jobProgress"></span></div>
+    <p id="jobMessage">Preparing</p>
+    <pre id="jobLog"></pre>
+    <div class="job-actions"><button id="cancelJob" class="button danger">Cancel job</button><button id="showLog" class="button ghost">Show full log</button></div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>

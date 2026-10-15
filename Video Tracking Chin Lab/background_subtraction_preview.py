@@ -29,12 +29,14 @@ from background_subtraction_tracker import (
     interactive_particle_seeds_masked,
     locate_component_candidates,
     open_video,
+    parse_seed_points,
     print_focus_summary,
     read_background_frame,
     resolve_background_path,
     resolve_focus_rois,
     sanitize_output_name,
     should_select_focus_box,
+    validate_seed_points_in_focus,
 )
 from track_orthogonal_3d import (
     ChamberGeometry,
@@ -198,6 +200,19 @@ def parse_args() -> argparse.Namespace:
         help="Number of particles to click in each camera view in follow mode.",
     )
     parser.add_argument(
+        "--front-seeds",
+        type=parse_seed_points,
+        help=(
+            "Front-camera crop-local particle positions as x,y;x,y. Supply this "
+            "with --side-seeds to skip the graphical seed windows."
+        ),
+    )
+    parser.add_argument(
+        "--side-seeds",
+        type=parse_seed_points,
+        help="Side-camera crop-local particle positions as x,y;x,y.",
+    )
+    parser.add_argument(
         "--search-radius-px",
         type=int,
         default=12,
@@ -329,24 +344,31 @@ def main() -> int:
     front_states = None
     side_states = None
     if args.focus_box_mode == "follow":
-        front_seed_points = interactive_particle_seeds_masked(
-            video_path=video_path,
-            camera_name="front",
-            channel=args.channel,
-            roi=front_roi,
-            seed_frame=seed_frame,
-            particle_count=args.particle_count,
-            focus_roi=front_focus_roi,
-        )
-        side_seed_points = interactive_particle_seeds_masked(
-            video_path=video_path,
-            camera_name="side",
-            channel=args.channel,
-            roi=side_roi,
-            seed_frame=seed_frame,
-            particle_count=args.particle_count,
-            focus_roi=side_focus_roi,
-        )
+        if args.front_seeds is not None:
+            front_seed_points = list(args.front_seeds)
+            side_seed_points = list(args.side_seeds)
+            validate_seed_points_in_focus(front_seed_points, front_focus_roi, "front")
+            validate_seed_points_in_focus(side_seed_points, side_focus_roi, "side")
+            print("Using particle seed coordinates supplied by Video Analysis Studio.")
+        else:
+            front_seed_points = interactive_particle_seeds_masked(
+                video_path=video_path,
+                camera_name="front",
+                channel=args.channel,
+                roi=front_roi,
+                seed_frame=seed_frame,
+                particle_count=args.particle_count,
+                focus_roi=front_focus_roi,
+            )
+            side_seed_points = interactive_particle_seeds_masked(
+                video_path=video_path,
+                camera_name="side",
+                channel=args.channel,
+                roi=side_roi,
+                seed_frame=seed_frame,
+                particle_count=args.particle_count,
+                focus_roi=side_focus_roi,
+            )
         front_states = make_particle_states(front_seed_points)
         side_states = make_particle_states(side_seed_points)
 
@@ -438,6 +460,17 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--seed-frame must be zero or positive.")
     if args.particle_count <= 0:
         raise SystemExit("--particle-count must be positive.")
+    if (args.front_seeds is None) != (args.side_seeds is None):
+        raise SystemExit("--front-seeds and --side-seeds must be supplied together.")
+    if args.front_seeds is not None:
+        if len(args.front_seeds) != args.particle_count:
+            raise SystemExit(
+                "--front-seeds must contain exactly --particle-count coordinates."
+            )
+        if len(args.side_seeds) != args.particle_count:
+            raise SystemExit(
+                "--side-seeds must contain exactly --particle-count coordinates."
+            )
     if args.search_radius_px <= 0:
         raise SystemExit("--search-radius-px must be positive.")
     if args.particle_window_radius_px <= 0:

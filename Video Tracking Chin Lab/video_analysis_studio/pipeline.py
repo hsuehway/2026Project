@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import math
 from pathlib import Path
 import re
 from typing import Any, Iterable
@@ -57,11 +58,14 @@ class PipelinePlanner:
 
     def __init__(self, project_root: Path, python_executable: Path) -> None:
         self.root = project_root.resolve()
-        self.python = python_executable.resolve()
+        # Do not resolve a virtual-environment interpreter symlink to its base
+        # Python executable: doing so drops the venv's installed dependencies.
+        self.python = python_executable.absolute()
 
     def build(self, action: str, session: dict[str, Any]) -> PipelinePlan:
         trial = _mapping(session.get("trial"), "trial")
         artifacts = _mapping(session.get("artifacts", {}), "artifacts")
+        results = _mapping(session.get("results", {}), "results")
         name = str(trial.get("name") or infer_trial_id(str(trial.get("video_path", ""))) or "trial")
         token = new_run_token(name, action)
 
@@ -70,7 +74,19 @@ class PipelinePlanner:
             label = "Full background-subtraction preview" if full else "Background-subtraction preview"
             return PipelinePlan(action, label, [self._preview(trial, token, full=full)])
         if action == "track":
-            return PipelinePlan(action, "Background-subtraction tracking", [self._track(trial, token)])
+            track_step = self._track(trial, token)
+            tracks_path = Path(str(track_step.artifacts["tracks_csv"]))
+            verify_step = self._verify_tracking(
+                trial,
+                artifacts,
+                f"{token}_overlay",
+                tracks_override=tracks_path,
+            )
+            return PipelinePlan(
+                action,
+                "Track particles and render video overlays",
+                [track_step, verify_step],
+            )
         if action == "verify_tracking":
             return PipelinePlan(
                 action,
@@ -85,7 +101,90 @@ class PipelinePlanner:
             )
         if action in {"translational", "rotational", "both"}:
             return self._finish_plan(action, trial, artifacts, token)
+        if action == "orbit_analysis":
+            return PipelinePlan(
+                action,
+                "Detect circular-motion episodes",
+                [self._orbit_analysis(trial, results, token)],
+            )
         raise ValueError(f"Unknown studio action: {action}")
+
+    def _orbit_analysis(
+        self,
+        trial: dict[str, Any],
+        settings: dict[str, Any],
+        token: str,
+    ) -> CommandStep:
+        source_value = str(settings.get("source_csv") or "").strip()
+        if not source_value:
+            raise FileNotFoundError("Choose or import a position-versus-time CSV first.")
+        source = Path(source_value).expanduser()
+        if not source.is_absolute():
+            source = self.root / source
+        source = source.resolve()
+        if not source.is_file() or source.suffix.lower() != ".csv":
+            raise FileNotFoundError(f"Position CSV does not exist: {source}")
+
+        detector = self.root.parent / "orbit" / "code" / "analyze_orbits_from_csv.py"
+        if not detector.is_file():
+            raise FileNotFoundError(f"Circular-motion detector was not found: {detector}")
+
+        output_dir = self.root / "outputs_background" / "orbit_results" / token
+        label = str(settings.get("label") or trial.get("name") or source.stem).strip()
+        command = [
+            str(self.python),
+            str(detector),
+            str(source),
+            "--output-dir",
+            str(output_dir),
+            "--label",
+            label,
+        ]
+        video_value = str(settings.get("video_path") or "").strip()
+        if video_value:
+            video = Path(video_value).expanduser()
+            if not video.is_absolute():
+                video = self.root / video
+            video = video.resolve()
+            if not video.is_file():
+                raise FileNotFoundError(f"Companion video does not exist: {video}")
+            command += ["--video", str(video)]
+        for flag, key in (
+            ("--fps", "fps"),
+            ("--particle", "particle"),
+            ("--time-col", "time_col"),
+            ("--frame-col", "frame_col"),
+            ("--x-col", "x_col"),
+            ("--y-col", "y_col"),
+            ("--z-col", "z_col"),
+            ("--position-unit", "position_unit"),
+            ("--band-low-hz", "band_low_hz"),
+            ("--band-high-hz", "band_high_hz"),
+            ("--threshold", "threshold"),
+            ("--minimum-episode-s", "minimum_episode_s"),
+            ("--merge-gap-s", "merge_gap_s"),
+            ("--smooth-window-s", "smooth_window_s"),
+            ("--radius-window-s", "radius_window_s"),
+            ("--max-gap-samples", "max_gap_samples"),
+        ):
+            command += _optional_arg(flag, settings.get(key))
+
+        output_artifacts: dict[str, str | list[str]] = {
+            "orbit_intervals_csv": str(output_dir / "orbit_intervals.csv"),
+            "orbit_timeseries_csv": str(output_dir / "orbit_timeseries.csv"),
+            "orbit_summary_json": str(output_dir / "orbit_summary.json"),
+            "orbit_diagnostic_plot": str(output_dir / "orbit_diagnostic.png"),
+            "orbit_xy_plot": str(output_dir / "orbit_xy.png"),
+            "orbit_report_html": str(output_dir / "orbit_report.html"),
+        }
+        if video_value and Path(video_value).suffix.lower() not in {".mp4", ".m4v"}:
+            output_artifacts["orbit_source_video"] = str(output_dir / "orbit_source_video.mp4")
+        return CommandStep(
+            "orbit_analysis",
+            "Analyze circular motion",
+            command,
+            output_artifacts,
+        )
 
     def _finish_plan(
         self,
@@ -152,7 +251,15 @@ class PipelinePlanner:
         if _truthy(settings.get("force_calibration")):
             command.append("--force-calibration")
         command += self._common_subtraction_args(trial, settings)
-        command += _optional_arg("--start-frame", settings.get("start_frame"))
+        start_frame = settings.get("start_frame")
+        seed_frame = settings.get("seed_frame")
+        if str(settings.get("focus_box_mode") or "follow") == "follow":
+            try:
+                if seed_frame is not None and int(start_frame) < int(seed_frame):
+                    start_frame = seed_frame
+            except (TypeError, ValueError):
+                start_frame = seed_frame
+        command += _optional_arg("--start-frame", start_frame)
         command += _optional_arg("--max-frames", 0 if full else settings.get("max_frames"))
         command += _optional_arg("--particle-window-radius-px", settings.get("particle_window_radius_px"))
         command += _optional_arg("--outside-window-display-threshold", settings.get("outside_window_display_threshold"))
@@ -191,12 +298,18 @@ class PipelinePlanner:
             token,
         )
         command += self._common_subtraction_args(trial, settings)
+        command += ["--fps", str(self._required_fps(trial))]
         command += _optional_arg("--max-frames", settings.get("max_frames"))
+        command += _optional_arg(
+            "--missing-search-expansion-px",
+            settings.get("missing_search_expansion_px"),
+        )
         command += _optional_arg("--manual-correction-after-misses", settings.get("manual_correction_after_misses"))
         command += _optional_arg("--manual-correction-close-px", settings.get("manual_correction_close_px"))
         command += _optional_arg("--front-overlap-frames", settings.get("front_overlap_frames"))
         command += _optional_arg("--side-overlap-frames", settings.get("side_overlap_frames"))
         command += _optional_arg("--identity-authority", settings.get("identity_authority"))
+        command += _optional_arg("--z-source", settings.get("z_source"))
         command += _optional_arg("--max-jump-mm", settings.get("max_jump_mm"))
         command += _optional_arg("--smooth-window", settings.get("smooth_window"))
         command += _optional_arg("--smooth-polyorder", settings.get("smooth_polyorder"))
@@ -221,18 +334,20 @@ class PipelinePlanner:
         trial: dict[str, Any],
         artifacts: dict[str, Any],
         token: str,
+        tracks_override: Path | None = None,
     ) -> CommandStep:
-        preview = self._required_artifact(artifacts, "preview_video", "Run or select a preview first.")
-        tracks = self._current_tracks(artifacts)
+        source_video = self._required_trial_file(trial, "video_path", "Choose a source video.")
+        tracks = tracks_override or self._current_tracks(artifacts)
         calibration = self._required_trial_file(trial, "calibration_path", "Choose a calibration.")
         parent = self.root / "outputs_background" / "verification"
         output_dir = parent / token
-        base = slugify(preview.stem)
+        base = slugify(source_video.stem)
         settings = _mapping(trial.get("verification", {}), "verification settings")
+        tracking_settings = _mapping(trial.get("tracking", {}), "tracking settings")
         command = self._script(
             "verify_tracking_overlay.py",
             "--preview",
-            preview,
+            source_video,
             "--csv",
             tracks,
             "--calibration",
@@ -241,18 +356,36 @@ class PipelinePlanner:
             parent,
             "--output-name",
             token,
+            "--source-layout",
+            "combined",
         )
-        command += _optional_arg("--preview-start-frame", settings.get("preview_start_frame", 1))
+        command += _optional_arg("--preview-start-frame", tracking_settings.get("seed_frame", 1))
         command += _optional_arg("--trail-length", settings.get("trail_length"))
-        command += _optional_arg("--max-frames", settings.get("max_frames"))
+        frame_step = settings.get("frame_step")
+        if frame_step in (None, ""):
+            fps = self._required_fps(trial)
+            frame_step = max(1, math.ceil(fps / 60.0))
+        command += _optional_arg("--preview-frame-step", frame_step)
+        position_source = str(settings.get("position_source") or "smoothed")
+        command += ["--position-source", position_source]
+        command += _optional_arg(
+            "--max-frames",
+            settings.get("max_frames") or tracking_settings.get("max_frames"),
+        )
+        overlay_artifacts: dict[str, str | list[str]] = {}
+        if position_source in {"raw", "both"}:
+            overlay_artifacts["track_verification_raw"] = str(
+                output_dir / f"{base}_verification_raw.mp4"
+            )
+        if position_source in {"smoothed", "both"}:
+            overlay_artifacts["track_verification_smoothed"] = str(
+                output_dir / f"{base}_verification_smoothed.mp4"
+            )
         return CommandStep(
             "verify_tracking",
             "Render tracking overlays",
             command,
-            {
-                "track_verification_raw": str(output_dir / f"{base}_verification_raw.mp4"),
-                "track_verification_smoothed": str(output_dir / f"{base}_verification_smoothed.mp4"),
-            },
+            overlay_artifacts,
         )
 
     def _review_identities(
@@ -302,7 +435,7 @@ class PipelinePlanner:
             "--csv",
             tracks,
             "--fps",
-            trial.get("fps", 60),
+            self._required_fps(trial),
             "--output-dir",
             parent,
             "--output-name",
@@ -326,7 +459,7 @@ class PipelinePlanner:
             "--csv",
             motion,
             "--fps",
-            trial.get("fps", 60),
+            self._required_fps(trial),
             "--state-source",
             settings.get("canonical_source", "raw"),
             "--output-dir",
@@ -422,7 +555,7 @@ class PipelinePlanner:
             "--preview",
             preview,
             "--fps",
-            trial.get("fps", 60),
+            self._required_fps(trial),
             "--output-dir",
             parent,
             "--output-name",
@@ -528,11 +661,27 @@ class PipelinePlanner:
         for flag, key in (
             ("--front-focus-box", "front_focus_box"),
             ("--side-focus-box", "side_focus_box"),
+            ("--front-seeds", "front_seeds"),
+            ("--side-seeds", "side_seeds"),
         ):
             args += _optional_arg(flag, settings.get(key))
         if _truthy(settings.get("no_focus_box")):
             args.append("--no-focus-box")
         return args
+
+    def _required_fps(self, trial: dict[str, Any]) -> float:
+        value = trial.get("fps")
+        try:
+            fps = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Confirm the source frame rate before calculating motion or state vectors."
+            ) from exc
+        if fps <= 0:
+            raise ValueError(
+                "Confirm a positive source frame rate before calculating motion or state vectors."
+            )
+        return fps
 
     def _script(self, script: str, *parts: Any) -> list[str]:
         command = [str(self.python), str(self.root / script)]

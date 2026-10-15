@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import csv
+import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import mimetypes
 import os
@@ -26,8 +29,9 @@ from .pipeline import PipelinePlan, PipelinePlanner, flatten_artifact_paths, inf
 PACKAGE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = PACKAGE_DIR / "studio_web"
 SESSION_FILENAME = ".video_analysis_studio_session.json"
-SESSION_VERSION = 1
+SESSION_VERSION = 2
 MAX_LOG_CHARACTERS = 250_000
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024 * 1024
 
 
 def launch_studio() -> int:
@@ -35,7 +39,9 @@ def launch_studio() -> int:
     backend = StudioBackend(project_root)
     server = StudioHTTPServer(("127.0.0.1", 0), StudioRequestHandler, backend)
     host, port = server.server_address
-    url = f"http://{host}:{port}/?token={quote(server.access_token)}"
+    # Bind to the loopback interface for safety, but show the familiar hostname
+    # in the browser. ``localhost`` and ``127.0.0.1`` resolve to the same Mac.
+    url = f"http://localhost:{port}/?token={quote(server.access_token)}"
     print(f"Video Analysis Studio: {url}")
     threading.Timer(0.35, lambda: webbrowser.open(url, new=1)).start()
     try:
@@ -100,11 +106,13 @@ class StudioBackend:
         return self.project_root / SESSION_FILENAME
 
     def bootstrap(self) -> dict[str, Any]:
+        loaded = self.load_session()
         return {
             "version": SESSION_VERSION,
             "project_root": str(self.project_root),
             "python": str(self.python_executable),
-            "session": self.load_session()["session"],
+            "session": loaded["session"],
+            "session_source": loaded["source"],
             "library": self.scan_library(),
         }
 
@@ -117,7 +125,8 @@ class StudioBackend:
                 "video_path": "",
                 "background_path": "",
                 "calibration_path": "",
-                "fps": 60,
+                "fps": "",
+                "media_info": {},
                 "particle_count": 2,
                 "preview": {
                     "channel": "green",
@@ -139,7 +148,9 @@ class StudioBackend:
                     "fixed_scale": 40,
                     "max_frames": 300,
                     "force_calibration": False,
-                    "no_focus_box": False,
+                    "no_focus_box": True,
+                    "front_seeds": "",
+                    "side_seeds": "",
                 },
                 "tracking": {
                     "channel": "green",
@@ -150,6 +161,7 @@ class StudioBackend:
                     "front_focus_box": "",
                     "side_focus_box": "",
                     "search_radius_px": 12,
+                    "missing_search_expansion_px": 1.0,
                     "threshold_fraction": 0.35,
                     "min_difference": 4,
                     "memory": 120,
@@ -160,16 +172,25 @@ class StudioBackend:
                     "side_overlap_frames": "",
                     "identity_authority": "auto",
                     "z_pairing_check": False,
+                    "z_source": "average",
                     "max_jump_mm": 0.15,
                     "smooth_window": 7,
                     "smooth_polyorder": 2,
                     "no_manual_correction": False,
-                    "no_focus_box": False,
+                    "no_focus_box": True,
+                    "front_seeds": "",
+                    "side_seeds": "",
                 },
                 "verification": {
                     "preview_start_frame": 1,
                     "trail_length": 0,
+                    "frame_step": "",
                     "max_frames": "",
+                    "position_source": "raw",
+                },
+                "review": {
+                    "raw_overlay_reviewed": False,
+                    "raw_overlay_note": "",
                 },
                 "identity_review": {
                     "mode": "manual",
@@ -214,6 +235,27 @@ class StudioBackend:
                 },
             },
             "artifacts": {},
+            "results": {
+                "source_csv": "",
+                "video_path": "",
+                "label": "",
+                "fps": "",
+                "particle": "",
+                "time_col": "",
+                "frame_col": "",
+                "x_col": "",
+                "y_col": "",
+                "z_col": "",
+                "position_unit": "",
+                "band_low_hz": 1.0,
+                "band_high_hz": 4.0,
+                "threshold": "auto",
+                "minimum_episode_s": 2.0,
+                "merge_gap_s": 0.75,
+                "smooth_window_s": 0.10,
+                "radius_window_s": 0.50,
+                "max_gap_samples": 2,
+            },
             "stage_status": {},
             "history": [],
             "active_result": "",
@@ -259,7 +301,7 @@ class StudioBackend:
         if not folder.is_dir():
             return []
         items: list[dict[str, Any]] = []
-        for path in folder.iterdir():
+        for path in folder.rglob("*"):
             try:
                 if not path.is_file() or path.suffix.lower() not in suffixes:
                     continue
@@ -268,7 +310,7 @@ class StudioBackend:
                 continue
             items.append(
                 {
-                    "name": path.name,
+                    "name": str(path.relative_to(folder)),
                     "path": str(path.resolve()),
                     "trial_id": infer_trial_id(path),
                     "size": stat.st_size,
@@ -277,18 +319,346 @@ class StudioBackend:
             )
         return sorted(items, key=lambda item: item["name"].lower())
 
+    def inspect_media(self, raw_path: str) -> dict[str, Any]:
+        path = Path(raw_path).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        try:
+            import av
+        except ImportError as exc:
+            raise RuntimeError("Media inspection requires the installed PyAV package.") from exc
+        with av.open(str(path)) as container:
+            if not container.streams.video:
+                raise ValueError("The selected file does not contain a video stream.")
+            stream = container.streams.video[0]
+            rate = float(stream.average_rate) if stream.average_rate else None
+            duration_s = None
+            if stream.duration is not None and stream.time_base is not None:
+                duration_s = float(stream.duration * stream.time_base)
+            elif container.duration is not None:
+                duration_s = float(container.duration / av.time_base)
+            frame_count = int(stream.frames) if stream.frames else None
+            if frame_count is None and duration_s is not None and rate is not None:
+                frame_count = int(round(duration_s * rate))
+            return {
+                "path": str(path),
+                "name": path.name,
+                "size_bytes": path.stat().st_size,
+                "width_px": int(stream.width),
+                "height_px": int(stream.height),
+                "fps": rate,
+                "frame_count": frame_count,
+                "duration_s": duration_s,
+                "codec": str(stream.codec_context.name or ""),
+            }
+
+    def frame_jpeg(
+        self,
+        raw_path: str,
+        frame_number: int,
+        calibration_path: str = "",
+        view: str = "full",
+    ) -> bytes:
+        path = Path(raw_path).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        if frame_number < 0:
+            raise ValueError("Frame number must be zero or positive.")
+        try:
+            import av
+        except ImportError as exc:
+            raise RuntimeError("Frame extraction requires the installed PyAV package.") from exc
+        with av.open(str(path)) as container:
+            if not container.streams.video:
+                raise ValueError("The selected file does not contain a video stream.")
+            stream = container.streams.video[0]
+            rate = float(stream.average_rate) if stream.average_rate else None
+            if frame_number and rate and stream.time_base:
+                target_pts = int((frame_number / rate) / float(stream.time_base))
+                container.seek(max(0, target_pts), stream=stream, backward=True)
+            selected = None
+            for decoded_index, frame in enumerate(container.decode(stream)):
+                if rate and frame.pts is not None and stream.time_base:
+                    estimated_index = int(round(float(frame.pts * stream.time_base) * rate))
+                else:
+                    estimated_index = decoded_index
+                selected = frame
+                if estimated_index >= frame_number:
+                    break
+            if selected is None:
+                raise ValueError(f"Frame {frame_number} is outside the video.")
+            image = selected.to_image().convert("RGB")
+
+        if view not in {"full", "front", "side"}:
+            raise ValueError("View must be full, front, or side.")
+        if view != "full":
+            calibration = Path(calibration_path).expanduser().resolve()
+            if not calibration.is_file():
+                raise FileNotFoundError("Choose or create a calibration before selecting particles.")
+            data = json.loads(calibration.read_text(encoding="utf-8"))
+            roi = data.get(f"{view}_roi")
+            if not isinstance(roi, dict):
+                raise ValueError(f"Calibration does not contain {view}_roi.")
+            x = int(roi["x"])
+            y = int(roi["y"])
+            width = int(roi["width"])
+            height = int(roi["height"])
+            if x < 0 or y < 0 or width <= 0 or height <= 0:
+                raise ValueError(f"Calibration contains an invalid {view}_roi.")
+            image = image.crop((x, y, x + width, y + height))
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=92, optimize=True)
+        return buffer.getvalue()
+
+    def csv_preview(self, raw_path: str, limit: int = 200) -> dict[str, Any]:
+        path = Path(raw_path).expanduser().resolve()
+        if not path.is_file() or path.suffix.lower() != ".csv":
+            raise FileNotFoundError(path)
+        limit = min(max(int(limit), 1), 1000)
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle)
+            try:
+                columns = next(reader)
+            except StopIteration:
+                return {"path": str(path), "columns": [], "rows": [], "truncated": False}
+            rows: list[list[str]] = []
+            for index, row in enumerate(reader):
+                if index >= limit:
+                    return {
+                        "path": str(path),
+                        "columns": columns,
+                        "rows": rows,
+                        "truncated": True,
+                    }
+                rows.append(row)
+        return {"path": str(path), "columns": columns, "rows": rows, "truncated": False}
+
+    def track_quality(self, raw_path: str) -> dict[str, Any]:
+        """Return descriptive tracking diagnostics without declaring scientific validity."""
+
+        path = Path(raw_path).expanduser().resolve()
+        if not path.is_file() or path.suffix.lower() != ".csv":
+            raise FileNotFoundError(path)
+        try:
+            import numpy as np
+            import pandas as pd
+        except ImportError as exc:
+            raise RuntimeError("Track diagnostics require the installed pandas package.") from exc
+
+        tracks = pd.read_csv(path)
+        required = {"particle", "frame", "x_mm", "y_mm", "z_mm"}
+        missing = sorted(required.difference(tracks.columns))
+        if missing:
+            raise ValueError(f"Track CSV is missing required columns: {missing}")
+        if tracks.empty:
+            raise ValueError("Track CSV is empty.")
+
+        numeric_columns = [
+            column
+            for column in (
+                "frame", "x_mm", "y_mm", "z_mm", "z_error_mm",
+                "front_confidence", "side_confidence",
+            )
+            if column in tracks.columns
+        ]
+        for column in numeric_columns:
+            tracks[column] = pd.to_numeric(tracks[column], errors="coerce")
+
+        particle_summaries: list[dict[str, Any]] = []
+        all_steps: list[np.ndarray] = []
+        total_expected = 0
+        total_observed = 0
+        total_gaps = 0
+        for particle, group in tracks.groupby("particle", sort=True):
+            group = group.sort_values("frame")
+            valid_frames = group["frame"].dropna().astype(int)
+            if valid_frames.empty:
+                continue
+            unique_frames = np.sort(valid_frames.unique())
+            expected = int(unique_frames[-1] - unique_frames[0] + 1)
+            observed = int(len(unique_frames))
+            gaps = max(0, expected - observed)
+            xyz = group[["x_mm", "y_mm", "z_mm"]].to_numpy(dtype=float)
+            steps = np.linalg.norm(np.diff(xyz, axis=0), axis=1)
+            steps = steps[np.isfinite(steps)]
+            if steps.size:
+                all_steps.append(steps)
+            particle_summaries.append(
+                {
+                    "particle": _json_scalar(particle),
+                    "first_frame": int(unique_frames[0]),
+                    "last_frame": int(unique_frames[-1]),
+                    "observed_frames": observed,
+                    "missing_frames": gaps,
+                    "coverage_fraction": observed / expected if expected else 1.0,
+                }
+            )
+            total_expected += expected
+            total_observed += observed
+            total_gaps += gaps
+
+        def finite_summary(column: str) -> dict[str, float | None] | None:
+            if column not in tracks.columns:
+                return None
+            values = tracks[column].to_numpy(dtype=float)
+            values = values[np.isfinite(values)]
+            if not values.size:
+                return None
+            return {
+                "median": float(np.median(values)),
+                "p95": float(np.percentile(values, 95)),
+                "max": float(np.max(values)),
+            }
+
+        combined_steps = np.concatenate(all_steps) if all_steps else np.array([], dtype=float)
+        missing_positions = int(tracks[["x_mm", "y_mm", "z_mm"]].isna().any(axis=1).sum())
+        inside_fraction = None
+        if "inside_chamber" in tracks.columns:
+            inside = tracks["inside_chamber"].astype(str).str.lower().map({"true": 1.0, "false": 0.0})
+            if inside.notna().any():
+                inside_fraction = float(inside.mean())
+
+        return {
+            "path": str(path),
+            "row_count": int(len(tracks)),
+            "particle_count": int(tracks["particle"].nunique(dropna=True)),
+            "first_frame": int(tracks["frame"].min()),
+            "last_frame": int(tracks["frame"].max()),
+            "coverage_fraction": total_observed / total_expected if total_expected else None,
+            "missing_frame_count": total_gaps,
+            "missing_position_rows": missing_positions,
+            "inside_chamber_fraction": inside_fraction,
+            "z_error_mm": finite_summary("z_error_mm"),
+            "front_confidence": finite_summary("front_confidence"),
+            "side_confidence": finite_summary("side_confidence"),
+            "step_mm": {
+                "median": float(np.median(combined_steps)) if combined_steps.size else None,
+                "p95": float(np.percentile(combined_steps, 95)) if combined_steps.size else None,
+                "max": float(np.max(combined_steps)) if combined_steps.size else None,
+            },
+            "particles": particle_summaries,
+            "interpretation": (
+                "Descriptive diagnostics only. Review the overlay and establish dataset-specific "
+                "acceptance thresholds before treating a track as valid."
+            ),
+        }
+
+    def receive_upload(
+        self,
+        kind: str,
+        original_name: str,
+        size: int,
+        source,
+    ) -> dict[str, Any]:
+        folders = {
+            "video": "Videos",
+            "background": "Backgrounds",
+            "results_csv": "outputs_background/imported_results",
+        }
+        suffixes = {
+            "video": {".mp4", ".mkv", ".mov", ".avi"},
+            "background": {".mp4", ".mkv", ".mov", ".avi", ".png", ".jpg", ".jpeg", ".tif", ".tiff"},
+            "results_csv": {".csv"},
+        }
+        if kind not in folders:
+            raise ValueError("Upload type must be video or background.")
+        if size <= 0 or size > MAX_UPLOAD_BYTES:
+            raise ValueError("Upload size is invalid or exceeds 100 GB.")
+        clean_name = Path(original_name).name
+        supplied_suffix = Path(clean_name).suffix.lower()
+        if supplied_suffix and supplied_suffix not in suffixes[kind]:
+            raise ValueError(f"Unsupported {kind} file type: {supplied_suffix}")
+        if not supplied_suffix and kind != "video":
+            raise ValueError(f"Extensionless {kind.replace('_', ' ')} files are not supported.")
+
+        header = source.read(min(size, 16))
+        if not header:
+            raise ValueError("The uploaded file is empty.")
+        suffix = supplied_suffix or _extensionless_video_suffix(header)
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(clean_name).stem).strip("._-") or kind
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        destination_dir = self.project_root / folders[kind]
+        if kind in {"video", "background"}:
+            destination_dir /= "imported"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination = destination_dir / f"{stamp}_{uuid4().hex[:6]}_{stem}{suffix}"
+        temporary = destination.with_suffix(destination.suffix + ".part")
+        digest = hashlib.sha256()
+        remaining = size - len(header)
+        try:
+            with temporary.open("xb") as handle:
+                handle.write(header)
+                digest.update(header)
+                while remaining:
+                    chunk = source.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("Upload ended before the declared file size.")
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+            temporary.replace(destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+        manifest_dir = self.project_root / "outputs_background" / "import_manifests"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = manifest_dir / f"{destination.name}.json"
+        manifest = {
+            "created_at": _now(),
+            "original_name": clean_name,
+            "imported_path": str(destination.resolve()),
+            "size_bytes": size,
+            "sha256": digest.hexdigest(),
+            "kind": kind,
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        return {"path": str(destination.resolve()), "manifest": str(manifest_path.resolve()), **manifest}
+
     def suggest_companions(self, video_path: str) -> dict[str, str]:
         path = Path(video_path).expanduser().resolve()
         trial_id = infer_trial_id(path)
         library = self.scan_library()
         calibration = _best_trial_match(library["calibrations"], trial_id)
         background = _best_trial_match(library["backgrounds"], trial_id)
+        provenance = self._find_provenance_companions(trial_id)
+        calibration = calibration or provenance.get("calibration_path", "")
+        background = background or provenance.get("background_path", "")
         return {
             "trial_id": trial_id,
             "name": trial_id or path.stem,
             "calibration_path": calibration,
             "background_path": background,
+            "provenance_source": provenance.get("provenance_source", ""),
+            "calibration_status": provenance.get("calibration_status", ""),
         }
+
+    def _find_provenance_companions(self, trial_id: str) -> dict[str, str]:
+        if not trial_id:
+            return {}
+        summaries = self.project_root.glob("outputs*/**/summary.json")
+        candidates: list[tuple[float, dict[str, str]]] = []
+        for summary_path in summaries:
+            try:
+                data = json.loads(summary_path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or str(data.get("video_id") or "").upper() != trial_id:
+                    continue
+                background = Path(str(data.get("background") or "")).expanduser()
+                calibration = Path(str(data.get("calibration_file_used") or "")).expanduser()
+                candidate = {
+                    "background_path": str(background.resolve()) if background.is_file() else "",
+                    "calibration_path": str(calibration.resolve()) if calibration.is_file() else "",
+                    "provenance_source": str(summary_path.resolve()),
+                    "calibration_status": str(data.get("calibration_status") or ""),
+                }
+                if candidate["background_path"] or candidate["calibration_path"]:
+                    candidates.append((summary_path.stat().st_mtime, candidate))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        if not candidates:
+            return {}
+        return max(candidates, key=lambda item: item[0])[1]
 
     def pick_path(self, kind: str) -> str:
         filters = {
@@ -406,6 +776,8 @@ class StudioBackend:
 
     def _complete_job(self, job: StudioJob, session: dict[str, Any]) -> None:
         session = _merge_defaults(self.default_session(), session)
+        manifest_path = self._write_run_manifest(job, session)
+        job.artifacts["run_manifest"] = str(manifest_path)
         artifacts = session.setdefault("artifacts", {})
         artifacts.update(job.artifacts)
         if job.action in {"preview", "preview_full"}:
@@ -430,6 +802,58 @@ class StudioBackend:
             job.message = "Workflow complete"
             job.finished_at = _now()
             self._append_log(job, "\nWorkflow complete.\n")
+
+    def _write_run_manifest(self, job: StudioJob, session: dict[str, Any]) -> Path:
+        manifest_dir = self.project_root / "outputs_background" / "studio_manifests"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = manifest_dir / f"{job.started_at[:19].replace(':', '')}_{job.action}_{job.job_id[:8]}.json"
+        revision = ""
+        dirty = None
+        try:
+            revision_result = subprocess.run(
+                ["git", "-C", str(self.project_root), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if revision_result.returncode == 0:
+                revision = revision_result.stdout.strip()
+            dirty_result = subprocess.run(
+                ["git", "-C", str(self.project_root), "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if dirty_result.returncode == 0:
+                dirty = bool(dirty_result.stdout.strip())
+        except OSError:
+            pass
+        trial_value = session.get("trial", {})
+        trial = trial_value if isinstance(trial_value, dict) else {}
+        results_value = session.get("results", {})
+        results = results_value if isinstance(results_value, dict) else {}
+        manifest = {
+            "schema_version": 1,
+            "job_id": job.job_id,
+            "action": job.action,
+            "label": job.label,
+            "started_at": job.started_at,
+            "finished_at": _now(),
+            "source_video": trial.get("video_path", ""),
+            "background": trial.get("background_path", ""),
+            "calibration": trial.get("calibration_path", ""),
+            "fps": trial.get("fps", ""),
+            "particle_count": trial.get("particle_count", ""),
+            "results_source_csv": results.get("source_csv", ""),
+            "results_video": results.get("video_path", ""),
+            "settings": {"trial": trial, "results": results},
+            "commands": job.command_preview,
+            "artifacts": job.artifacts,
+            "code_revision": revision,
+            "worktree_dirty": dirty,
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        return manifest_path.resolve()
 
     def _apply_preview_metadata(
         self,
@@ -496,7 +920,12 @@ class StudioBackend:
         path = Path(raw_path).expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(path)
-        os.startfile(path)  # type: ignore[attr-defined]
+        if os.name == "nt":
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
         return str(path)
 
 
@@ -531,6 +960,46 @@ class StudioRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/library":
             self._json(HTTPStatus.OK, self.server.backend.scan_library())
             return
+        if parsed.path == "/api/inspect":
+            try:
+                raw_path = parse_qs(parsed.query).get("path", [""])[0]
+                self._json(HTTPStatus.OK, self.server.backend.inspect_media(raw_path))
+            except Exception as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        if parsed.path == "/api/frame":
+            try:
+                query = parse_qs(parsed.query)
+                data = self.server.backend.frame_jpeg(
+                    query.get("path", [""])[0],
+                    int(query.get("frame", ["0"])[0]),
+                    query.get("calibration", [""])[0],
+                    query.get("view", ["full"])[0],
+                )
+                self._bytes(HTTPStatus.OK, data, "image/jpeg")
+            except Exception as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        if parsed.path == "/api/table":
+            try:
+                query = parse_qs(parsed.query)
+                self._json(
+                    HTTPStatus.OK,
+                    self.server.backend.csv_preview(
+                        query.get("path", [""])[0],
+                        int(query.get("limit", ["200"])[0]),
+                    ),
+                )
+            except Exception as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        if parsed.path == "/api/quality":
+            try:
+                raw_path = parse_qs(parsed.query).get("path", [""])[0]
+                self._json(HTTPStatus.OK, self.server.backend.track_quality(raw_path))
+            except Exception as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
         if parsed.path == "/api/job":
             try:
                 job_id = parse_qs(parsed.query).get("id", [""])[0]
@@ -545,6 +1014,41 @@ class StudioRequestHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
             return
+        if parsed.path == "/sp6" or parsed.path.startswith("/sp6/"):
+            relative = parsed.path.removeprefix("/sp6/") if parsed.path.startswith("/sp6/") else ""
+            relative = relative or "sp6-orbit-viewer.html"
+            root = (self.server.backend.project_root.parent / "orbit").resolve()
+            target = (root / relative).resolve()
+            try:
+                target.relative_to(root)
+            except ValueError:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            try:
+                self._serve_media(target)
+            except Exception:
+                self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if parsed.path == "/current-orbit" or parsed.path.startswith("/current-orbit/"):
+            session = self.server.backend.load_session()["session"]
+            report_value = session.get("artifacts", {}).get("orbit_report_html")
+            if not report_value:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            report = Path(str(report_value)).expanduser().resolve()
+            root = report.parent
+            relative = (
+                parsed.path.removeprefix("/current-orbit/")
+                if parsed.path.startswith("/current-orbit/")
+                else ""
+            )
+            target = report if not relative else (root / relative).resolve()
+            try:
+                target.relative_to(root)
+                self._serve_media(target)
+            except Exception:
+                self.send_error(HTTPStatus.NOT_FOUND)
+            return
         relative = "index.html" if parsed.path in {"", "/"} else parsed.path.lstrip("/")
         self._serve_static(relative)
 
@@ -554,6 +1058,17 @@ class StudioRequestHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.FORBIDDEN, {"error": "Invalid studio access token."})
             return
         try:
+            if parsed.path == "/api/upload":
+                query = parse_qs(parsed.query)
+                size = int(self.headers.get("Content-Length", "0"))
+                result = self.server.backend.receive_upload(
+                    query.get("kind", [""])[0],
+                    query.get("filename", [""])[0],
+                    size,
+                    self.rfile,
+                )
+                self._json(HTTPStatus.CREATED, result)
+                return
             payload = self._read_json()
             if parsed.path == "/api/session":
                 self._json(HTTPStatus.OK, self.server.backend.save_session(payload))
@@ -648,13 +1163,22 @@ class StudioRequestHandler(BaseHTTPRequestHandler):
                 chunk = handle.read(min(1024 * 1024, remaining))
                 if not chunk:
                     break
-                self.wfile.write(chunk)
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    # Browsers routinely cancel an in-flight range request when
+                    # the user seeks or a video element selects a newer range.
+                    # That is a successful cancellation, not a media failure.
+                    return
                 remaining -= len(chunk)
 
     def _json(self, status: HTTPStatus, value: Any) -> None:
         data = json.dumps(value).encode("utf-8")
+        self._bytes(status, data, "application/json; charset=utf-8")
+
+    def _bytes(self, status: HTTPStatus, data: bytes, content_type: str) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -672,12 +1196,13 @@ def _resolve_python(project_root: Path) -> Path:
     candidates = [
         project_root / ".venv" / "Scripts" / "python.exe",
         project_root / ".venv" / "bin" / "python",
+        project_root / ".venv-macos" / "bin" / "python",
         Path(sys.executable),
     ]
     for candidate in candidates:
         if candidate.is_file():
-            return candidate.resolve()
-    return Path(sys.executable).resolve()
+            return candidate.absolute()
+    return Path(sys.executable).absolute()
 
 
 def _now() -> str:
@@ -699,6 +1224,13 @@ def _object(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Session must be an object.")
     return value
+
+
+def _json_scalar(value: Any) -> Any:
+    """Convert pandas/numpy scalar values to their plain Python equivalent."""
+
+    item = getattr(value, "item", None)
+    return item() if callable(item) else value
 
 
 def _best_trial_match(items: list[dict[str, Any]], trial_id: str) -> str:
@@ -771,3 +1303,17 @@ def _windows_open_dialog(title: str, file_filter: str, initial_directory: Path) 
 
 def _powershell_literal(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _extensionless_video_suffix(header: bytes) -> str:
+    """Infer common extensionless video containers without changing the source."""
+
+    if header.startswith(b"\x1aE\xdf\xa3"):
+        return ".mkv"
+    if len(header) >= 12 and header[4:8] == b"ftyp":
+        return ".mp4"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"AVI ":
+        return ".avi"
+    raise ValueError(
+        "This extensionless file is not a recognized Matroska, MP4/QuickTime, or AVI video."
+    )

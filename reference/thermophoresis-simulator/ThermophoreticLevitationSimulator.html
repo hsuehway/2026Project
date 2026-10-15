@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Thermophoresis Simulator v22</title>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:#0e1117; color:#e2e8f0; font-family:monospace; font-size:11px; padding:6px; }
+input[type=number]{ background:#0a1220; border:1px solid #1e3048; color:#e2e8f0; border-radius:2px; padding:2px 4px; font-family:monospace; font-size:10px; width:72px; }
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{ -webkit-appearance:none; margin:0; }
+input[type=number]{ -moz-appearance:textfield; }
+input[type=range]{ width:100%; }
+button{ cursor:pointer; border:none; border-radius:3px; font-family:monospace; font-weight:700; }
+.card{ background:#141e2e; border:1px solid #1e3048; border-radius:5px; padding:5px; }
+.row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
+.lbl{ color:#7c8fa6; font-size:9px; }
+.sec-hdr{ display:flex; justify-content:space-between; align-items:center; background:#0f1e30; border:1px solid #1e3048; border-radius:3px; padding:3px 6px; cursor:pointer; margin-bottom:0; font-size:9px; font-weight:700; user-select:none; }
+.sec-hdr:hover{ background:#162438; }
+.sec-body{ padding:4px 2px 4px 2px; }
+.sec-body.closed{ display:none; }
+.arrow{ transition:transform 0.15s; display:inline-block; }
+.closed-hdr .arrow{ transform:rotate(-90deg); }
+.layout{ display:flex; gap:5px; align-items:flex-start; flex-wrap:wrap; }
+canvas{ display:block; background:#060d1a; border-radius:4px; border:1px solid #1e3048; }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+  <div>
+    <span style="color:#7dd3fc;font-size:12px;font-weight:700;">Thermophoresis Simulator v22</span>
+    <span style="color:#334155;font-size:8px;margin-left:8px;">RK4 · 13-DOF quaternion · Λ general 9 DOF · v22 Eqs 24–27</span>
+  </div>
+  <button onclick="resetAll()" style="background:#374151;color:#fff;padding:3px 8px;font-size:10px;">↺ Reset</button>
+</div>
+
+<div style="display:flex;gap:3px;margin-bottom:4px;flex-wrap:wrap;align-items:center;">
+  <span style="color:#7dd3fc;font-size:9px;font-weight:700;">Presets:</span>
+  <button onclick="applyPreset('sphere')"  style="background:#1e3048;color:#94a3b8;border:1px solid #2d4a6a;padding:2px 6px;font-size:9px;">🟢 Sphere (Λ=0)</button>
+  <button onclick="applyPreset('sym')"     style="background:#1e3048;color:#94a3b8;border:1px solid #2d4a6a;padding:2px 6px;font-size:9px;">🔵 Sym Λ (aligning)</button>
+  <button onclick="applyPreset('antisym')" style="background:#1e3048;color:#94a3b8;border:1px solid #2d4a6a;padding:2px 6px;font-size:9px;">🟣 Antisym Λ (precessing)</button>
+  <button onclick="applyPreset('chiral')"  style="background:#1e3048;color:#94a3b8;border:1px solid #2d4a6a;padding:2px 6px;font-size:9px;">🔴 Chiral (mixed)</button>
+  <button onclick="applyPreset('sp6')"     style="background:#0f766e;color:#ecfeff;border:1px solid #2dd4bf;padding:2px 6px;font-size:9px;">SP6 fitted orbit</button>
+  <span id="syminfo" style="color:#fbbf24;font-size:8px;margin-left:4px;">Λ sym: 70% · G₀=1.96</span>
+</div>
+
+<div class="layout">
+<div class="card" style="width:195px;flex-shrink:0;max-height:90vh;overflow-y:auto;">
+
+  <div class="sec-hdr" id="hdr_particle" onclick="toggleSec('particle')">
+    <span style="color:#7dd3fc;">🔵 Particle — Mass &amp; Inertia</span><span class="arrow">▼</span>
+  </div>
+  <div class="sec-body" id="body_particle">
+    <div class="row"><span class="lbl">Mass M (kg)</span><input type="number" id="M" value="1" step="0.1" oninput="updateG0()"></div>
+    <div class="row"><span class="lbl">Gravity g (m/s²)</span><input type="number" id="g" value="9.81" step="0.01" oninput="updateG0()"></div>
+    <div class="lbl" style="margin-bottom:1px;">Inertia I = diag(I₁, I₂, I₃) kg·m²</div>
+    <div style="display:flex;gap:2px;">
+      <input type="number" id="I1" value="0.02" step="0.001" style="width:60px;">
+      <input type="number" id="I2" value="0.02" step="0.001" style="width:60px;">
+      <input type="number" id="I3" value="0.008" step="0.001" style="width:60px;">
+    </div>
+  </div>
+
+  <div class="sec-hdr" id="hdr_temp" onclick="toggleSec('temp')" style="margin-top:2px;">
+    <span style="color:#7dd3fc;">🌡️ Temperature Field — Harmonic Trap</span><span class="arrow">▼</span>
+  </div>
+  <div class="sec-body" id="body_temp">
+    <div style="color:#64748b;font-size:8px;margin-bottom:3px;line-height:1.5;">
+      ∇lnT = (αᵣ·x, αᵣ·y, αz·z − G₀)<br>G₀ = Mg/Γ₁₁ — levitation gradient (v22 Eq 48)
+    </div>
+    <div class="row"><span class="lbl">αᵣ — radial</span><input type="number" id="ar" value="0.5" step="0.05"></div>
+    <div class="row"><span class="lbl">αz — axial</span><input type="number" id="az" value="0.5" step="0.05"></div>
+    <div id="G0display" style="color:#4ade80;font-size:9px;margin-top:2px;">G₀ = 1.962</div>
+  </div>
+
+  <div class="sec-hdr" id="hdr_gamma" onclick="toggleSec('gamma')" style="margin-top:2px;">
+    <span style="color:#81c784;">𝚪 — Thermophoretic Force (symmetric, 6 DOF)</span><span class="arrow">▼</span>
+  </div>
+  <div class="sec-body" id="body_gamma">
+    <div style="color:#64748b;font-size:8px;margin-bottom:3px;"><b style="color:#81c784;">F</b><sub>T</sub> = −𝚪 (∇lnT)<sup>b</sup> · symmetric by Onsager · Γ₁₁ sets G₀</div>
+    <div id="GammaBox"></div>
+    <div style="display:flex;gap:2px;margin-top:3px;">
+      <button onclick="setSymPreset('Gamma','iso')"  style="background:#1e3048;color:#81c784;padding:1px 5px;font-size:8px;">Isotropic</button>
+      <button onclick="setSymPreset('Gamma','diag')" style="background:#1e3048;color:#81c784;padding:1px 5px;font-size:8px;">Diagonal</button>
+    </div>
+  </div>
+
+  <div class="sec-hdr" id="hdr_lambda" onclick="toggleSec('lambda')" style="margin-top:2px;">
+    <span style="color:#f48fb1;">𝚲 — Thermophoretic Torque (general, 9 DOF)</span><span class="arrow">▼</span>
+  </div>
+  <div class="sec-body" id="body_lambda">
+    <div style="color:#64748b;font-size:8px;margin-bottom:3px;line-height:1.4;">
+      <b style="color:#f48fb1;">τ</b><sub>T</sub> = −𝚲 (∇lnT)<sup>b</sup> · no symmetry constraint<br>
+      <span style="color:#81c784;">Λ_sym → alignment</span> · <span style="color:#ce93d8;">Λ_antisym → precession (ξ×u)</span>
+    </div>
+    <div id="symbar" style="height:4px;background:#0f1e30;border-radius:2px;overflow:hidden;margin-bottom:2px;">
+      <div id="symfill" style="height:100%;width:70%;background:linear-gradient(90deg,#7c3aed,#4ade80);transition:width 0.2s;"></div>
+    </div>
+    <div id="sympct" style="font-size:8px;color:#fbbf24;margin-bottom:3px;">sym 70% · ξ = (0.00, 0.00, 0.05)</div>
+    <div id="LambdaBox"></div>
+    <div style="display:flex;gap:2px;margin-top:3px;flex-wrap:wrap;">
+      <button onclick="setLambdaPreset('zero')"   style="background:#1e3048;color:#f48fb1;padding:1px 4px;font-size:8px;">Zero</button>
+      <button onclick="setLambdaPreset('sym')"    style="background:#1e3048;color:#f48fb1;padding:1px 4px;font-size:8px;">Pure Sym</button>
+      <button onclick="setLambdaPreset('anti')"   style="background:#1e3048;color:#f48fb1;padding:1px 4px;font-size:8px;">Pure Anti</button>
+      <button onclick="setLambdaPreset('chiral')" style="background:#1e3048;color:#f48fb1;padding:1px 4px;font-size:8px;">Chiral</button>
+      <button onclick="setLambdaPreset('xiz')"    style="background:#1e3048;color:#f48fb1;padding:1px 4px;font-size:8px;">ξ=(001)</button>
+    </div>
+  </div>
+
+  <div class="sec-hdr" id="hdr_xi" onclick="toggleSec('xi')" style="margin-top:2px;">
+    <span style="color:#4fc3f7;">𝚵 — Drag / Resistance (symmetric, 6 DOF)</span><span class="arrow">▶</span>
+  </div>
+  <div class="sec-body closed" id="body_xi">
+    <div style="color:#64748b;font-size:8px;margin-bottom:3px;"><b style="color:#4fc3f7;">F</b><sub>drag</sub> = −𝚵 v<sup>b</sup> · symmetric by energy dissipation</div>
+    <div id="XiBox"></div>
+  </div>
+
+  <div class="sec-hdr" id="hdr_cr" onclick="toggleSec('cr')" style="margin-top:2px;">
+    <span style="color:#ffb74d;">𝑪ᵣ — Rotational Drag (symmetric, 6 DOF)</span><span class="arrow">▶</span>
+  </div>
+  <div class="sec-body closed" id="body_cr">
+    <div style="color:#64748b;font-size:8px;margin-bottom:3px;"><b style="color:#ffb74d;">τ</b><sub>drag</sub> = −𝑪ᵣ ω<sup>b</sup> · symmetric by energy dissipation</div>
+    <div id="CrBox"></div>
+  </div>
+
+  <div class="sec-hdr" id="hdr_init" onclick="toggleSec('init')" style="margin-top:2px;">
+    <span style="color:#7dd3fc;">🚀 Initial Conditions</span><span class="arrow">▼</span>
+  </div>
+  <div class="sec-body" id="body_init">
+    <div class="row"><span class="lbl">Tilt θ₀ (°)</span><input type="number" id="tilt" value="30" step="5"></div>
+    <div class="lbl" style="margin-bottom:1px;">x₀ (m)</div>
+    <div style="display:flex;gap:2px;margin-bottom:2px;">
+      <input type="number" id="x0_0" value="0.5" step="0.1" style="width:60px;">
+      <input type="number" id="x0_1" value="0.3" step="0.1" style="width:60px;">
+      <input type="number" id="x0_2" value="0.2" step="0.1" style="width:60px;">
+    </div>
+    <div class="lbl" style="margin-bottom:1px;">v₀ (m/s)</div>
+    <div style="display:flex;gap:2px;margin-bottom:2px;">
+      <input type="number" id="v0_0" value="0" step="0.001" style="width:60px;">
+      <input type="number" id="v0_1" value="0" step="0.001" style="width:60px;">
+      <input type="number" id="v0_2" value="0" step="0.001" style="width:60px;">
+    </div>
+    <div class="lbl" style="margin-bottom:1px;">ω₀ (rad/s)</div>
+    <div style="display:flex;gap:2px;">
+      <input type="number" id="wb0_0" value="0"   step="0.5" style="width:60px;">
+      <input type="number" id="wb0_1" value="0.5" step="0.5" style="width:60px;">
+      <input type="number" id="wb0_2" value="2"   step="0.5" style="width:60px;">
+    </div>
+  </div>
+
+  <div class="sec-hdr" id="hdr_sim" onclick="toggleSec('sim')" style="margin-top:2px;">
+    <span style="color:#7dd3fc;">⏱ Simulation Settings</span><span class="arrow">▶</span>
+  </div>
+  <div class="sec-body closed" id="body_sim">
+    <div class="row"><span class="lbl">t_start (s)</span><input type="number" id="tStart" value="0" step="1"></div>
+    <div class="row"><span class="lbl">t_end (s)</span><input type="number" id="tEnd" value="20" step="1"></div>
+    <div class="row"><span class="lbl">Steps</span><input type="number" id="nSteps" value="1200" step="100"></div>
+    <div style="color:#64748b;font-size:8px;margin-top:2px;line-height:1.5;">
+      Display range: t ∈ [t_start, t_end]<br>Increase steps for smoother animation.
+    </div>
+  </div>
+
+  <button onclick="runSim()" id="runBtn" style="background:#0f766e;color:#fff;width:100%;margin-top:5px;padding:6px;font-size:10px;">▶ Run Simulation</button>
+  <div id="msgbox" style="margin-top:3px;font-size:8px;line-height:1.4;color:#64748b;">Configure parameters and click ▶ Run</div>
+  <div id="resultbox" style="margin-top:3px;font-size:8px;color:#475569;line-height:1.6;display:none;"></div>
+</div>
+
+<div style="flex:1 1 305px;min-width:265px;">
+  <div class="card" style="margin-bottom:4px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
+      <span style="color:#7dd3fc;font-size:9px;font-weight:700;">3-D View &nbsp;<span style="color:#ef5350;">■</span> e₁ &nbsp;<span style="color:#66bb6a;">■</span> e₂ &nbsp;<span style="color:#42a5f5;">■</span> e₃ &nbsp;<span style="color:#ffd54f;">■</span> ω</span>
+      <span id="frameinfo" style="color:#475569;font-size:8px;"></span>
+    </div>
+    <canvas id="canvas3d" width="305" height="245"></canvas>
+    <div style="display:flex;gap:10px;margin-top:3px;">
+      <label class="lbl">Elev <span id="elevVal">20</span>° <input type="range" id="elev" min="-80" max="80" value="20" style="width:65px;" oninput="elevVal.textContent=this.value;drawScene()"></label>
+      <label class="lbl">Azim <span id="azimVal">35</span>° <input type="range" id="azim" min="0" max="360" value="35" style="width:65px;" oninput="azimVal.textContent=this.value;drawScene()"></label>
+    </div>
+  </div>
+  <div class="card" id="playerCard" style="display:none;">
+    <div style="display:flex;gap:3px;align-items:center;margin-bottom:2px;">
+      <button onclick="goStart()" style="background:#1d4ed8;color:#fff;padding:2px 6px;font-size:10px;">⏮</button>
+      <button id="playBtn" onclick="togglePlay()" style="background:#1d4ed8;color:#fff;padding:2px 8px;font-size:10px;">▶ Play</button>
+      <button onclick="goEnd()" style="background:#1d4ed8;color:#fff;padding:2px 6px;font-size:10px;">⏭</button>
+      <span id="playinfo" style="color:#475569;font-size:8px;margin-left:3px;"></span>
+    </div>
+    <input type="range" id="scrubber" min="0" max="100" value="0" style="width:100%;" oninput="scrub(this.value)">
+  </div>
+</div>
+
+<div style="flex:1 1 192px;min-width:178px;display:flex;flex-direction:column;gap:3px;">
+  <div class="card"><div style="color:#7dd3fc;font-size:8px;font-weight:700;margin-bottom:1px;">CoM Position (m) &nbsp;<span style="color:#4fc3f7;">x</span> <span style="color:#81c784;">y</span> <span style="color:#ffb74d;">z</span></div><canvas id="chartPos" width="192" height="82"></canvas></div>
+  <div class="card"><div style="color:#7dd3fc;font-size:8px;font-weight:700;margin-bottom:1px;">Angular Velocity ω (rad/s) &nbsp;<span style="color:#ef9a9a;">ω₁</span> <span style="color:#ce93d8;">ω₂</span> <span style="color:#80cbc4;">ω₃</span></div><canvas id="chartOmega" width="192" height="82"></canvas></div>
+  <div class="card"><div style="color:#7dd3fc;font-size:8px;font-weight:700;margin-bottom:1px;">Tilt angle θ (°)</div><canvas id="chartTilt" width="192" height="82"></canvas></div>
+  <div class="card"><div style="color:#7dd3fc;font-size:8px;font-weight:700;margin-bottom:1px;">cos(ω,u) &amp; Ω<sub>z</sub> &nbsp;<span style="color:#64748b;font-weight:400;">→1 eigenmode · →0 limit cycle</span></div><canvas id="chartCos" width="192" height="82"></canvas></div>
+</div>
+</div>
+
+<script>
+const CANVAS_SIZES={'canvas3d':{w:305,h:245},'chartPos':{w:192,h:82},'chartOmega':{w:192,h:82},'chartTilt':{w:192,h:82},'chartCos':{w:192,h:82}};
+
+function toggleSec(id){const body=document.getElementById('body_'+id),hdr=document.getElementById('hdr_'+id),isOpen=!body.classList.contains('closed');body.classList.toggle('closed',isOpen);hdr.classList.toggle('closed-hdr',isOpen);hdr.querySelector('.arrow').textContent=isOpen?'▶':'▼';}
+
+const unpack6=t=>[t[0],t[1],t[2],t[1],t[3],t[4],t[2],t[4],t[5]];
+const mv6=(t,v)=>{const m=unpack6(t);return[m[0]*v[0]+m[1]*v[1]+m[2]*v[2],m[3]*v[0]+m[4]*v[1]+m[5]*v[2],m[6]*v[0]+m[7]*v[1]+m[8]*v[2]];};
+const mv9=(t,v)=>[t[0]*v[0]+t[1]*v[1]+t[2]*v[2],t[3]*v[0]+t[4]*v[1]+t[5]*v[2],t[6]*v[0]+t[7]*v[1]+t[8]*v[2]];
+const diag6=(a,b,c)=>[a,0,0,b,0,c];
+const scalar6=s=>diag6(s,s,s);
+function symFrac9(t){let ns=0,n=0;for(let i=0;i<3;i++)for(let j=0;j<3;j++){const s=(t[i*3+j]+t[j*3+i])/2;ns+=s*s;n+=t[i*3+j]*t[i*3+j];}return n<1e-12?1:Math.sqrt(ns/n);}
+
+const norm4=q=>{const n=Math.hypot(...q);return q.map(x=>x/n);};
+const cross3=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+function quatToR(q){const[q0,q1,q2,q3]=q;return[1-2*(q2*q2+q3*q3),2*(q1*q2-q0*q3),2*(q1*q3+q0*q2),2*(q1*q2+q0*q3),1-2*(q1*q1+q3*q3),2*(q2*q3-q0*q1),2*(q1*q3-q0*q2),2*(q2*q3+q0*q1),1-2*(q1*q1+q2*q2)];}
+const Rv3=(R,v)=>[R[0]*v[0]+R[1]*v[1]+R[2]*v[2],R[3]*v[0]+R[4]*v[1]+R[5]*v[2],R[6]*v[0]+R[7]*v[1]+R[8]*v[2]];
+const RtV=(R,v)=>[R[0]*v[0]+R[3]*v[1]+R[6]*v[2],R[1]*v[0]+R[4]*v[1]+R[7]*v[2],R[2]*v[0]+R[5]*v[1]+R[8]*v[2]];
+const qdot_=(q,w)=>{const[q0,q1,q2,q3]=q;return[.5*(-q1*w[0]-q2*w[1]-q3*w[2]),.5*(q0*w[0]-q3*w[1]+q2*w[2]),.5*(q3*w[0]+q0*w[1]-q1*w[2]),.5*(-q2*w[0]+q1*w[1]+q0*w[2])];};
+const axQ=(ax,deg)=>{const a=deg*Math.PI/180,n=Math.hypot(...ax),k=ax.map(x=>x/n);return[Math.cos(a/2),k[0]*Math.sin(a/2),k[1]*Math.sin(a/2),k[2]*Math.sin(a/2)];};
+
+function makeRHS(M,Id,Xi,Ga,Cr,La,ar,az,G0,g){return s=>{const x=s.slice(0,3),v=s.slice(3,6),q=norm4(s.slice(6,10)),wb=s.slice(10,13),R=quatToR(q),gTb=RtV(R,[ar*x[0],ar*x[1],az*x[2]-G0]),vb=RtV(R,v),Fb=mv6(Ga,gTb).map((f,i)=>-(f+mv6(Xi,vb)[i])),Fl=Rv3(R,Fb),tT=mv9(La,gTb),tD=mv6(Cr,wb),Iw=[Id[0]*wb[0],Id[1]*wb[1],Id[2]*wb[2]],gy=cross3(wb,Iw);return[...v,Fl[0]/M,Fl[1]/M,Fl[2]/M-g,...qdot_(q,wb),(-(tT[0]+tD[0])-gy[0])/Id[0],(-(tT[1]+tD[1])-gy[1])/Id[1],(-(tT[2]+tD[2])-gy[2])/Id[2]];};}
+function rk4(rhs,s,dt){const k1=rhs(s),k2=rhs(s.map((v,i)=>v+.5*dt*k1[i])),k3=rhs(s.map((v,i)=>v+.5*dt*k2[i])),k4=rhs(s.map((v,i)=>v+dt*k3[i])),sn=s.map((v,i)=>v+dt*(k1[i]+2*k2[i]+2*k3[i]+k4[i])/6),qn=norm4(sn.slice(6,10));for(let i=0;i<4;i++)sn[6+i]=qn[i];return sn;}
+
+let frames=null,fi=0,playing=false,rafId=null,lastTs=null;
+let Gamma=scalar6(5),Xi=scalar6(2),Cr=scalar6(0.5);
+let Lambda=[0.3,0.1,0,0,0.3,0,0,0,0.1];
+
+const SYM_MAP=[[0,1,2],[1,3,4],[2,4,5]];
+const SYM_COLORS={Gamma:'#81c784',Xi:'#4fc3f7',Cr:'#ffb74d'};
+
+function buildSymGrid(name){
+  const color=SYM_COLORS[name],getter=()=>({Gamma,Xi,Cr})[name];
+  const setter=v=>({Gamma:w=>{Gamma=w;updateG0();},Xi:w=>{Xi=w;},Cr:w=>{Cr=w;}})[name](v);
+  const t=getter(),box=document.getElementById(name+'Box');box.innerHTML='';
+  const wrap=document.createElement('div');wrap.style.cssText='display:flex;flex-direction:column;gap:2px;align-items:center;';
+  for(let ri=0;ri<3;ri++){const row=document.createElement('div');row.style.cssText='display:flex;gap:2px;';
+    for(let ci=0;ci<3;ci++){const si=SYM_MAP[ri][ci],up=ri<=ci,inp=document.createElement('input');
+      inp.type='number';inp.step='0.05';inp.value=t[si].toFixed(3);
+      inp.style.cssText=`width:58px;background:${up?'#060e1a':'#0a1525'};border:1px solid ${ri===ci?color:up?'#1e3048':'#0f1e30'};color:${up?'#e2e8f0':'#3a5570'};border-radius:2px;padding:1px 2px;font-size:9px;font-family:monospace;text-align:center;`;
+      if(!up)inp.readOnly=true;
+      else inp.oninput=()=>{const v=getter();v[si]=parseFloat(inp.value)||0;setter(v);if(ri!==ci)buildSymGrid(name);};
+      row.appendChild(inp);}wrap.appendChild(row);}box.appendChild(wrap);}
+
+function buildLambdaGrid(){
+  const box=document.getElementById('LambdaBox');box.innerHTML='';
+  const wrap=document.createElement('div');wrap.style.cssText='display:flex;flex-direction:column;gap:2px;align-items:center;';
+  for(let ri=0;ri<3;ri++){const row=document.createElement('div');row.style.cssText='display:flex;gap:2px;';
+    for(let ci=0;ci<3;ci++){const si=ri*3+ci,diag=ri===ci,inp=document.createElement('input');
+      inp.type='number';inp.step='0.05';inp.value=Lambda[si].toFixed(3);
+      inp.style.cssText=`width:58px;background:${diag?'#0b1730':ri<ci?'#060e1a':'#0a1220'};border:1px solid ${diag?'#f48fb1':ri<ci?'#1e3048':'#162030'};color:${diag?'#e2e8f0':ri<ci?'#cbd5e1':'#6a8aaa'};border-radius:2px;padding:1px 2px;font-size:9px;font-family:monospace;text-align:center;`;
+      inp.oninput=()=>{Lambda[si]=parseFloat(inp.value)||0;updateSymBar();};
+      row.appendChild(inp);}wrap.appendChild(row);}box.appendChild(wrap);}
+
+function updateSymBar(){
+  const sf=symFrac9(Lambda),p=(sf*100).toFixed(0);
+  document.getElementById('symfill').style.width=p+'%';
+  const xi=[(Lambda[7]-Lambda[5])/2,(Lambda[2]-Lambda[6])/2,(Lambda[3]-Lambda[1])/2];
+  const el=document.getElementById('sympct');
+  el.textContent=`sym ${p}%  ·  ξ = (${xi.map(v=>v.toFixed(2)).join(', ')})`;
+  el.style.color=sf>0.8?'#4ade80':sf>0.4?'#fbbf24':'#f87171';
+  updateG0();}
+
+function updateG0(){
+  const M=parseFloat(document.getElementById('M').value)||1,g=parseFloat(document.getElementById('g').value)||9.81,G0=(M*g/(Gamma[0]||1)).toFixed(3);
+  document.getElementById('G0display').textContent='G₀ = '+G0;
+  const sf=symFrac9(Lambda);
+  document.getElementById('syminfo').textContent=`Λ sym:${(sf*100).toFixed(0)}% · G₀=${G0}`;
+  document.getElementById('syminfo').style.color=sf>0.8?'#4ade80':sf>0.4?'#fbbf24':'#f87171';}
+
+function setSymPreset(name,type){
+  const getter=()=>({Gamma,Xi,Cr})[name],setter=v=>({Gamma:w=>{Gamma=w;updateG0();},Xi:w=>{Xi=w;},Cr:w=>{Cr=w;}})[name](v);
+  if(type==='iso'){const s=getter()[0];setter(scalar6(s));}
+  else if(type==='diag'){const t=getter();setter(diag6(t[0],t[3],t[5]));}
+  buildSymGrid(name);updateG0();}
+
+function setLambdaPreset(name){
+  if(name==='zero')   Lambda=[0,0,0,0,0,0,0,0,0];
+  else if(name==='sym')    Lambda=[0.3,0.1,0.1,0.1,0.2,0.05,0.1,0.05,0.1];
+  else if(name==='anti')   Lambda=[0,-0.3,0,0.3,0,0,0,0,0];
+  else if(name==='chiral') Lambda=[0.3,0.1,0,0,0.3,0,0,0,0.1];
+  else if(name==='xiz')    Lambda=[0,-0.2,0,0.2,0,0,0,0,0];
+  buildLambdaGrid();updateSymBar();}
+
+function applyPreset(name){
+  if(playing)togglePlay();
+  document.getElementById('v0_0').value=0;document.getElementById('v0_1').value=0;document.getElementById('v0_2').value=0;
+  if(name==='sphere'){Lambda=[0,0,0,0,0,0,0,0,0];document.getElementById('I1').value=0.02;document.getElementById('I2').value=0.02;document.getElementById('I3').value=0.02;document.getElementById('wb0_0').value=0;document.getElementById('wb0_1').value=0;document.getElementById('wb0_2').value=0;document.getElementById('tilt').value=0;}
+  else if(name==='sym'){Lambda=[0.3,0,0,0,0.2,0,0,0,0.1];document.getElementById('wb0_1').value=0.5;document.getElementById('wb0_2').value=1;document.getElementById('tilt').value=45;}
+  else if(name==='antisym'){Lambda=[0,-0.3,0,0.3,0,0,0,0,0];document.getElementById('wb0_1').value=0.5;document.getElementById('wb0_2').value=2;document.getElementById('tilt').value=30;}
+  else if(name==='chiral'){Lambda=[0.3,0.15,0,0,0.3,0,0,0,0.1];document.getElementById('wb0_1').value=0.5;document.getElementById('wb0_2').value=2;document.getElementById('tilt').value=30;}
+  else if(name==='sp6'){
+    Gamma=[5,0,-0.0008528632769,5,-0.08685789134,5];
+    Xi=scalar6(40.84967320);Cr=scalar6(0.5);Lambda=[0,0,0,0,0,0,0,0,-3.111418508];
+    document.getElementById('M').value=1;document.getElementById('g').value=9.81;
+    document.getElementById('I1').value=0.02;document.getElementById('I2').value=0.02;document.getElementById('I3').value=0.008;
+    document.getElementById('ar').value=28.83350715;document.getElementById('az').value=0.5;
+    document.getElementById('tilt').value=0;
+    document.getElementById('x0_0').value=0.00034169;document.getElementById('x0_1').value=0;document.getElementById('x0_2').value=0;
+    document.getElementById('v0_0').value=0;document.getElementById('v0_1').value=-0.004171763675;document.getElementById('v0_2').value=0;
+    document.getElementById('wb0_0').value=0;document.getElementById('wb0_1').value=0;document.getElementById('wb0_2').value=-12.20920623;
+    document.getElementById('tStart').value=0;document.getElementById('tEnd').value=25;document.getElementById('nSteps').value=12000;
+  }
+  buildSymGrid('Gamma');buildSymGrid('Xi');buildSymGrid('Cr');buildLambdaGrid();updateSymBar();frames=null;fi=0;clearCanvasWithPrompt();clearCharts();
+  document.getElementById('playerCard').style.display='none';document.getElementById('resultbox').style.display='none';}
+
+function resetAll(){
+  if(playing)togglePlay();frames=null;fi=0;
+  Gamma=scalar6(5);Xi=scalar6(2);Cr=scalar6(0.5);Lambda=[0.3,0.1,0,0,0.3,0,0,0,0.1];
+  buildSymGrid('Gamma');buildSymGrid('Xi');buildSymGrid('Cr');buildLambdaGrid();updateSymBar();updateG0();
+  document.getElementById('M').value=1;document.getElementById('g').value=9.81;
+  document.getElementById('I1').value=0.02;document.getElementById('I2').value=0.02;document.getElementById('I3').value=0.008;
+  document.getElementById('ar').value=0.5;document.getElementById('az').value=0.5;
+  document.getElementById('tilt').value=30;document.getElementById('x0_0').value=0.5;document.getElementById('x0_1').value=0.3;document.getElementById('x0_2').value=0.2;
+  document.getElementById('v0_0').value=0;document.getElementById('v0_1').value=0;document.getElementById('v0_2').value=0;
+  document.getElementById('wb0_0').value=0;document.getElementById('wb0_1').value=0.5;document.getElementById('wb0_2').value=2;
+  document.getElementById('tStart').value=0;document.getElementById('tEnd').value=20;document.getElementById('nSteps').value=1200;
+  clearCharts();clearCanvasWithPrompt();document.getElementById('playerCard').style.display='none';
+  document.getElementById('resultbox').style.display='none';document.getElementById('frameinfo').textContent='';
+  document.getElementById('msgbox').style.color='#64748b';document.getElementById('msgbox').textContent='Reset to defaults.';}
+
+function runSim(){
+  if(playing)togglePlay();
+  document.getElementById('runBtn').textContent='⏳ Running…';
+  document.getElementById('msgbox').style.color='#64748b';document.getElementById('msgbox').textContent='Simulating…';
+  setTimeout(()=>{
+    try{
+      const M=parseFloat(document.getElementById('M').value)||1,g=parseFloat(document.getElementById('g').value)||9.81;
+      const Id=[parseFloat(document.getElementById('I1').value)||0.02,parseFloat(document.getElementById('I2').value)||0.02,parseFloat(document.getElementById('I3').value)||0.008];
+      const ar=parseFloat(document.getElementById('ar').value)||0.5,az=parseFloat(document.getElementById('az').value)||0.5;
+      const tilt=parseFloat(document.getElementById('tilt').value)||0,tEnd=parseFloat(document.getElementById('tEnd').value)||20;
+      const nSteps=parseInt(document.getElementById('nSteps').value)||1200,tStart=parseFloat(document.getElementById('tStart').value)||0;
+      const x0=[parseFloat(document.getElementById('x0_0').value)||0,parseFloat(document.getElementById('x0_1').value)||0,parseFloat(document.getElementById('x0_2').value)||0];
+      const v0=[parseFloat(document.getElementById('v0_0').value)||0,parseFloat(document.getElementById('v0_1').value)||0,parseFloat(document.getElementById('v0_2').value)||0];
+      const wb0=[parseFloat(document.getElementById('wb0_0').value)||0,parseFloat(document.getElementById('wb0_1').value)||0,parseFloat(document.getElementById('wb0_2').value)||0];
+      const G0=M*g/(Gamma[0]||1),rhs=makeRHS(M,Id,Xi,Gamma,Cr,Lambda,ar,az,G0,g);
+      const q0=axQ([1,0,0],tilt);let s=[...x0,...v0,...q0,...wb0];
+      const dt=tEnd/nSteps,all=[];
+      for(let i=0;i<=nSteps;i++){
+        const q=norm4(s.slice(6,10)),R=quatToR(q),u=[R[6],R[7],R[8]],wb=s.slice(10,13),wN=Math.hypot(...wb);
+        const cosWU=wN>1e-10?(wb[0]*u[0]+wb[1]*u[1]+wb[2]*u[2])/wN:1;
+        all.push({t:+(i*dt).toFixed(3),x:s[0],y:s[1],z:s[2],w1:wb[0],w2:wb[1],w3:wb[2],
+          speed:Math.hypot(s[3],s[4],s[5]),tilt:Math.acos(Math.max(-1,Math.min(1,R[8])))*180/Math.PI,
+          cosWU,omegaZ:Rv3(R,wb)[2],R:[...R]});
+        if(i<nSteps)s=rk4(rhs,s,dt);}
+      frames=all.filter(f=>f.t>=tStart-1e-9);if(frames.length<2)frames=all;
+      fi=0;
+      const sf=symFrac9(Lambda),regime=sf>0.85?'aligning':sf<0.15?'precessing':'mixed';
+      const fc=Math.abs(frames[frames.length-1].cosWU).toFixed(2);
+      const rc=parseFloat(fc)>0.9?'#4ade80':parseFloat(fc)<0.3?'#f87171':'#fbbf24';
+      const rl=parseFloat(fc)>0.9?'eigenmode (ω∥u)':parseFloat(fc)<0.3?'limit cycle (ω⊥u)':'mixed';
+      document.getElementById('msgbox').style.color='#4ade80';
+      document.getElementById('msgbox').textContent=`✓ Done · ${frames.length} frames · Λ: ${regime}`;
+      const rb=document.getElementById('resultbox');rb.style.display='block';
+      rb.innerHTML=`z:[${Math.min(...frames.map(f=>f.z)).toFixed(2)},${Math.max(...frames.map(f=>f.z)).toFixed(2)}] vmax=${Math.max(...frames.map(f=>f.speed)).toFixed(3)}<br>|cos(ω,u)|=${fc} <span style="color:${rc};font-weight:700;">${rl}</span>`;
+      document.getElementById('scrubber').max=frames.length-1;document.getElementById('scrubber').value=0;
+      document.getElementById('playerCard').style.display='block';drawScene();drawCharts();
+    }catch(e){document.getElementById('msgbox').style.color='#f87171';document.getElementById('msgbox').textContent='Error: '+e.message;frames=null;}
+    document.getElementById('runBtn').textContent='▶ Run Simulation';},10);}
+
+function scaleCanvas(cv){
+  const dpr=window.devicePixelRatio||1,w=CANVAS_SIZES[cv.id]?CANVAS_SIZES[cv.id].w:cv.clientWidth||cv.width,h=CANVAS_SIZES[cv.id]?CANVAS_SIZES[cv.id].h:cv.clientHeight||cv.height;
+  cv.width=w*dpr;cv.height=h*dpr;cv.style.width=w+'px';cv.style.height=h+'px';
+  const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);return dpr;}
+
+function proj2(pt){
+  const el=parseFloat(document.getElementById('elev').value)*Math.PI/180,az=parseFloat(document.getElementById('azim').value)*Math.PI/180,[x0,y0,z0]=pt,SC=142,CX=152,CY=122;
+  const x1=x0*Math.cos(az)+z0*Math.sin(az),y1=-x0*Math.sin(az)*Math.sin(el)+y0*Math.cos(el)+z0*Math.cos(az)*Math.sin(el),z1=-x0*Math.sin(az)*Math.cos(el)-y0*Math.sin(el)+z0*Math.cos(az)*Math.cos(el);
+  return[CX+x1*SC,CY-y1*SC,z1];}
+
+function mkCyl(hl=0.09,r=0.03,n=12){const V=[],F=[];
+  for(let i=0;i<n;i++){const t=2*Math.PI*i/n;V.push([r*Math.cos(t),r*Math.sin(t),hl]);}
+  for(let i=0;i<n;i++){const t=2*Math.PI*i/n;V.push([r*Math.cos(t),r*Math.sin(t),-hl]);}
+  V.push([0,0,hl]);V.push([0,0,-hl]);
+  for(let i=0;i<n;i++){const j=(i+1)%n;F.push({v:[i,j,j+n,i+n],k:'s'});F.push({v:[2*n,i,j],k:'t'});F.push({v:[2*n+1,j+n,i+n],k:'b'});}return{V,F};}
+const CYL=mkCyl();
+
+function clearCanvasWithPrompt(){
+  const cv=document.getElementById('canvas3d'),ctx=cv.getContext('2d'),{w:W,h:H}=CANVAS_SIZES['canvas3d'];
+  ctx.fillStyle='#060d1a';ctx.fillRect(0,0,W,H);ctx.fillStyle='#2a4a6a';ctx.font='11px monospace';ctx.textAlign='center';
+  ctx.fillText('Pick a preset  →  ▶ Run Simulation',W/2,H/2);}
+
+function drawScene(){
+  const cv=document.getElementById('canvas3d'),ctx=cv.getContext('2d'),{w:W,h:H}=CANVAS_SIZES['canvas3d'];
+  ctx.fillStyle='#060d1a';ctx.fillRect(0,0,W,H);
+  [[[.27,0,0],'#4fc3f7','X'],[[0,.27,0],'#81c784','Y'],[[0,0,.27],'#ffb74d','Z']].forEach(([e,c,l])=>{
+    const[ox,oy]=proj2([0,0,0]),[ex,ey]=proj2(e);
+    ctx.strokeStyle=c;ctx.setLineDash([3,3]);ctx.lineWidth=1;ctx.globalAlpha=0.5;ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(ex,ey);ctx.stroke();
+    ctx.globalAlpha=1;ctx.setLineDash([]);ctx.fillStyle=c;ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText(l,ex+2,ey+3);});
+  if(!frames||!frames[fi]){clearCanvasWithPrompt();return;}
+  const fr=frames[fi],R=fr.R,xc=[fr.x,fr.y,fr.z];
+  ctx.strokeStyle='#4fc3f7';ctx.lineWidth=0.5;ctx.globalAlpha=0.1;ctx.beginPath();
+  frames.filter((_,i)=>i%6===0).forEach((f,i)=>{const[px,py]=proj2([f.x,f.y,f.z]);i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);});ctx.stroke();ctx.globalAlpha=1;
+  ctx.strokeStyle='#4fc3f7';ctx.lineWidth=1.3;ctx.globalAlpha=0.7;ctx.beginPath();
+  frames.slice(0,fi+1).filter((_,i)=>i%3===0).forEach((f,i)=>{const[px,py]=proj2([f.x,f.y,f.z]);i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);});ctx.stroke();ctx.globalAlpha=1;
+  const tv=CYL.V.map(v=>proj2([R[0]*v[0]+R[1]*v[1]+R[2]*v[2]+xc[0],R[3]*v[0]+R[4]*v[1]+R[5]*v[2]+xc[1],R[6]*v[0]+R[7]*v[1]+R[8]*v[2]+xc[2]]));
+  [...CYL.F].map(f=>({...f,d:f.v.reduce((s,i)=>s+tv[i][2],0)/f.v.length})).sort((a,b)=>a.d-b.d).forEach(f=>{
+    ctx.beginPath();f.v.forEach((vi,i)=>{i===0?ctx.moveTo(tv[vi][0],tv[vi][1]):ctx.lineTo(tv[vi][0],tv[vi][1]);});
+    ctx.closePath();ctx.fillStyle=f.k==='t'?'#7986cb':f.k==='b'?'#5c6bc0':'#546e7a';ctx.fill();ctx.strokeStyle='#78909c';ctx.lineWidth=0.3;ctx.stroke();});
+  [[0,'#ef5350'],[1,'#66bb6a'],[2,'#42a5f5']].forEach(([ci,c])=>{
+    const ei=[R[ci],R[3+ci],R[6+ci]],tip=proj2([xc[0]+ei[0]*0.17,xc[1]+ei[1]*0.17,xc[2]+ei[2]*0.17]);
+    const[bx,by]=proj2(xc);ctx.strokeStyle=c;ctx.lineWidth=2;ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(tip[0],tip[1]);ctx.stroke();
+    ctx.fillStyle=c;ctx.beginPath();ctx.arc(tip[0],tip[1],2.5,0,2*Math.PI);ctx.fill();});
+  const wb=[fr.w1,fr.w2,fr.w3],wN=Math.hypot(...wb);
+  if(wN>0.01){const wL=Rv3(R,wb.map(w=>w*0.13/wN)),wT=proj2([xc[0]+wL[0],xc[1]+wL[1],xc[2]+wL[2]]);
+    const[bx,by]=proj2(xc);ctx.strokeStyle='#ffd54f';ctx.lineWidth=1.5;ctx.setLineDash([3,2]);ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(wT[0],wT[1]);ctx.stroke();
+    ctx.setLineDash([]);ctx.fillStyle='#ffd54f';ctx.beginPath();ctx.arc(wT[0],wT[1],2,0,2*Math.PI);ctx.fill();}
+  const[dx,dy]=proj2(xc);ctx.fillStyle='white';ctx.globalAlpha=0.9;ctx.beginPath();ctx.arc(dx,dy,3,0,2*Math.PI);ctx.fill();ctx.globalAlpha=1;
+  document.getElementById('frameinfo').textContent=`t=${fr.t.toFixed(1)}s  tilt=${fr.tilt.toFixed(0)}°  cos=${fr.cosWU.toFixed(2)}`;}
+
+function fmtV(v){const a=Math.abs(v);if(a===0)return'0';if(a>=100)return v.toFixed(0);if(a>=10)return v.toFixed(1);if(a>=1)return v.toFixed(2);return v.toFixed(3);}
+
+function drawLineChart(cid,keys,colors){
+  const cv=document.getElementById(cid),ctx=cv.getContext('2d'),{w:W,h:H}=CANVAS_SIZES[cid]||{w:192,h:82};
+  ctx.fillStyle='#141e2e';ctx.fillRect(0,0,W,H);
+  if(!frames||frames.length<2)return;
+  const stride=Math.max(1,Math.floor(frames.length/150)),pts=frames.filter((_,i)=>i%stride===0);
+  let mn=Infinity,mx=-Infinity;keys.forEach(k=>pts.forEach(f=>{mn=Math.min(mn,f[k]);mx=Math.max(mx,f[k]);}));
+  if(mn===mx){mn-=0.1;mx+=0.1;}
+  const LM=42,RM=4,BM=14,TM=4,PW=W-LM-RM,PH=H-BM-TM;
+  const px=i=>LM+i*(PW/(pts.length-1)),py=v=>TM+PH-(v-mn)*(PH/(mx-mn));
+  [mn,(mn+mx)/2,mx].forEach(v=>{const y=py(v);ctx.strokeStyle='#2d4a6a';ctx.lineWidth=0.5;ctx.setLineDash([2,3]);ctx.beginPath();ctx.moveTo(LM,y);ctx.lineTo(W-RM,y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#cbd5e1';ctx.font='9px monospace';ctx.textAlign='right';ctx.fillText(fmtV(v),LM-2,y+3);});
+  if(mn<0&&mx>0){const y=py(0);ctx.strokeStyle='#475569';ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(LM,y);ctx.lineTo(W-RM,y);ctx.stroke();}
+  ctx.strokeStyle='#2d4a6a';ctx.lineWidth=0.8;ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(LM,TM);ctx.lineTo(LM,TM+PH);ctx.stroke();
+  const cx=px(fi/Math.max(1,frames.length-1)*(pts.length-1));ctx.strokeStyle='#ff6e40';ctx.lineWidth=1;ctx.setLineDash([2,2]);ctx.beginPath();ctx.moveTo(cx,TM);ctx.lineTo(cx,TM+PH);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#94a3b8';ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText(fmtV(frames[0].t)+'s',LM,H-1);
+  ctx.textAlign='right';ctx.fillText(fmtV(frames[frames.length-1].t)+'s',W-RM,H-1);
+  ctx.textAlign='center';ctx.fillText(fmtV(frames[fi].t)+'s',Math.max(LM+14,Math.min(W-RM-14,cx)),H-1);
+  keys.forEach((k,si)=>{ctx.fillStyle=colors[si];ctx.fillRect(LM+4+si*34,TM+2,6,6);ctx.fillStyle='#94a3b8';ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText(k,LM+12+si*34,TM+9);});
+  keys.forEach((k,si)=>{ctx.strokeStyle=colors[si];ctx.lineWidth=1;ctx.beginPath();pts.forEach((f,i)=>{const x=px(i),y=py(f[k]);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});ctx.stroke();});}
+
+function drawCharts(){
+  if(!frames)return;
+  drawLineChart('chartPos',['x','y','z'],['#4fc3f7','#81c784','#ffb74d']);
+  drawLineChart('chartOmega',['w1','w2','w3'],['#ef9a9a','#ce93d8','#80cbc4']);
+  drawLineChart('chartTilt',['tilt'],['#fff176']);
+  drawLineChart('chartCos',['cosWU','omegaZ'],['#a5f3fc','#fda4af']);}
+
+function clearCharts(){['chartPos','chartOmega','chartTilt','chartCos'].forEach(id=>{const cv=document.getElementById(id),ctx=cv.getContext('2d'),{w:W,h:H}=CANVAS_SIZES[id]||{w:192,h:82};ctx.fillStyle='#141e2e';ctx.fillRect(0,0,W,H);});}
+
+function scrub(v){fi=parseInt(v);drawScene();drawCharts();}
+function goStart(){if(!frames)return;if(playing)togglePlay();fi=0;document.getElementById('scrubber').value=0;drawScene();drawCharts();}
+function goEnd(){if(!frames)return;if(playing)togglePlay();fi=frames.length-1;document.getElementById('scrubber').value=fi;drawScene();drawCharts();}
+function togglePlay(){if(!frames)return;playing=!playing;document.getElementById('playBtn').textContent=playing?'⏸ Pause':'▶ Play';if(playing){lastTs=null;rafId=requestAnimationFrame(playStep);}else cancelAnimationFrame(rafId);}
+function playStep(ts){if(!playing)return;if(lastTs===null)lastTs=ts;if(ts-lastTs>40){lastTs=ts;fi=(fi+1)%frames.length;document.getElementById('scrubber').value=fi;drawScene();drawCharts();document.getElementById('playinfo').textContent=`t=${frames[fi].t.toFixed(1)}s`;}rafId=requestAnimationFrame(playStep);}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  document.querySelectorAll('input[type=number]').forEach(inp=>{inp.addEventListener('blur',()=>{const v=parseFloat(inp.value);if(!isNaN(v))inp.value=Number(v.toPrecision(10)).toString();});inp.addEventListener('focus',()=>inp.select());});});
+
+Object.entries(CANVAS_SIZES).forEach(([id])=>{const cv=document.getElementById(id);if(cv)scaleCanvas(cv);});
+buildSymGrid('Gamma');buildSymGrid('Xi');buildSymGrid('Cr');buildLambdaGrid();updateSymBar();updateG0();
+clearCanvasWithPrompt();clearCharts();
+
+window.addEventListener('resize',()=>{Object.entries(CANVAS_SIZES).forEach(([id])=>{const cv=document.getElementById(id);if(cv)scaleCanvas(cv);});clearCanvasWithPrompt();if(frames){drawScene();drawCharts();}else clearCharts();});
+</script>
+</body>
+</html>

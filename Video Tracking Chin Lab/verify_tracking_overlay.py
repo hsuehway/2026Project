@@ -80,6 +80,22 @@ def parse_args() -> argparse.Namespace:
         help="Original tracking frame corresponding to preview video frame 0.",
     )
     parser.add_argument(
+        "--source-layout",
+        choices=("preview", "combined"),
+        default="preview",
+        help=(
+            "preview expects already-cropped camera panels. combined reads the "
+            "original combined recording, crops both calibrated camera panels, "
+            "and starts at --preview-start-frame."
+        ),
+    )
+    parser.add_argument(
+        "--position-source",
+        choices=("raw", "smoothed", "both"),
+        default="both",
+        help="Render raw markers, smoothed markers, or both output videos.",
+    )
+    parser.add_argument(
         "--preview-frame-step",
         type=int,
         default=1,
@@ -166,8 +182,12 @@ def main() -> int:
         "raw": output_dir / f"{preview_name}_verification_raw.mp4",
         "smoothed": output_dir / f"{preview_name}_verification_smoothed.mp4",
     }
+    selected_sources = (
+        POSITION_SOURCES if args.position_source == "both" else (args.position_source,)
+    )
     results: dict[str, dict[str, int]] = {}
-    for position_source in POSITION_SOURCES:
+    for position_source in selected_sources:
+        print(f"Rendering {position_source} tracking overlay...", flush=True)
         frames_written, markers_drawn = write_verification_video(
             preview_path=preview_path,
             output_path=output_paths[position_source],
@@ -187,10 +207,12 @@ def main() -> int:
                 "preview": str(preview_path.resolve()),
                 "csv": str(csv_path.resolve()),
                 "output_videos": {
-                    source: str(path.resolve())
-                    for source, path in output_paths.items()
+                    source: str(output_paths[source].resolve())
+                    for source in selected_sources
                 },
                 "preview_start_frame": args.preview_start_frame,
+                "source_layout": args.source_layout,
+                "position_source": args.position_source,
                 "preview_frame_step": args.preview_frame_step,
                 "view": args.view,
                 "layout": args.layout,
@@ -205,7 +227,7 @@ def main() -> int:
     print("\nDone.")
     print(f"Preview:        {preview_path.resolve()}")
     print(f"Tracks CSV:     {csv_path.resolve()}")
-    for source in POSITION_SOURCES:
+    for source in selected_sources:
         print(
             f"{source.title()} video:  {output_paths[source].resolve()} "
             f"({results[source]['frames_written']} frames, "
@@ -283,6 +305,10 @@ def resolve_panel_geometry(args: argparse.Namespace) -> dict[str, int]:
             "front_height": front_height,
             "side_width": side_width,
             "side_height": side_height,
+            "source_front_x": front_roi.x,
+            "source_front_y": front_roi.y,
+            "source_side_x": side_roi.x,
+            "source_side_y": side_roi.y,
         }
     return {
         "front_x": 0,
@@ -293,6 +319,10 @@ def resolve_panel_geometry(args: argparse.Namespace) -> dict[str, int]:
         "front_height": front_height,
         "side_width": side_width,
         "side_height": side_height,
+        "source_front_x": front_roi.x,
+        "source_front_y": front_roi.y,
+        "source_side_x": side_roi.x,
+        "source_side_y": side_roi.y,
     }
 
 
@@ -323,9 +353,23 @@ def write_verification_video(
     args: argparse.Namespace,
     position_source: Literal["raw", "smoothed"] = "raw",
 ) -> tuple[int, int]:
-    reader = imageio.get_reader(str(preview_path))
-    meta = reader.get_meta_data()
-    fps = float(meta.get("fps") or 30.0)
+    if args.source_layout == "combined":
+        import av
+
+        reader = av.open(str(preview_path))
+        stream = reader.streams.video[0]
+        fps = float(stream.average_rate) if stream.average_rate else 30.0
+        target_pts = int(
+            (args.preview_start_frame / fps) / float(stream.time_base)
+        )
+        reader.seek(max(0, target_pts), stream=stream, backward=True)
+        frame_indices = None
+    else:
+        reader = imageio.get_reader(str(preview_path))
+        meta = reader.get_meta_data()
+        fps = float(meta.get("fps") or 30.0)
+        frame_indices = None
+    output_fps = fps / args.preview_frame_step
     tracks_by_frame = {
         int(frame): group.copy()
         for frame, group in tracks.groupby("frame", sort=False)
@@ -333,16 +377,38 @@ def write_verification_video(
 
     frames_written = 0
     markers_drawn = 0
-    with imageio.get_writer(str(output_path), fps=fps, codec="libx264", quality=8) as writer:
+    with imageio.get_writer(
+        str(output_path),
+        fps=output_fps,
+        codec="libx264",
+        quality=6,
+        ffmpeg_params=["-preset", "ultrafast"],
+    ) as writer:
         try:
-            for preview_index, frame in enumerate(reader):
+            if args.source_layout == "combined":
+                iterator = decode_combined_frames(
+                    reader,
+                    stream,
+                    fps,
+                    args.preview_start_frame,
+                    args.preview_frame_step,
+                )
+            else:
+                iterator = enumerate(reader)
+            for preview_index, frame in iterator:
                 if args.max_frames is not None and frames_written >= args.max_frames:
                     break
                 track_frame = (
-                    args.preview_start_frame
-                    + preview_index * args.preview_frame_step
+                    int(preview_index)
+                    if args.source_layout == "combined"
+                    else args.preview_start_frame + preview_index * args.preview_frame_step
                 )
-                image = Image.fromarray(np.asarray(frame)[:, :, :3]).convert("RGB")
+                frame_array = np.asarray(frame)[:, :, :3]
+                image = (
+                    compose_combined_panels(frame_array, panel, args.layout)
+                    if args.source_layout == "combined"
+                    else Image.fromarray(frame_array).convert("RGB")
+                )
                 draw = ImageDraw.Draw(image)
                 rows = tracks_by_frame.get(track_frame)
                 if rows is not None and not rows.empty:
@@ -371,10 +437,63 @@ def write_verification_video(
                 draw_position_source_label(draw, position_source)
                 writer.append_data(np.asarray(image))
                 frames_written += 1
+                if frames_written % 500 == 0:
+                    print(
+                        f"{position_source} overlay: {frames_written} frames written",
+                        flush=True,
+                    )
         finally:
-            reader.close()
+            if args.source_layout == "combined":
+                reader.close()
+            else:
+                reader.close()
 
     return frames_written, markers_drawn
+
+
+def decode_combined_frames(container, stream, fps: float, start_frame: int, frame_step: int):
+    """Yield exact source frame numbers through one sequential decoder pass."""
+
+    last_frame_number = -1
+    for decoded in container.decode(stream):
+        if decoded.pts is None or stream.time_base is None:
+            frame_number = last_frame_number + 1
+        else:
+            frame_number = int(round(float(decoded.pts * stream.time_base) * fps))
+        last_frame_number = frame_number
+        if frame_number < start_frame:
+            continue
+        if (frame_number - start_frame) % frame_step:
+            continue
+        yield frame_number, decoded.to_ndarray(format="rgb24")
+
+
+def compose_combined_panels(
+    frame: np.ndarray,
+    panel: dict[str, int],
+    layout: str,
+) -> Image.Image:
+    """Crop calibrated panels from a raw combined frame for visible overlays."""
+
+    front = Image.fromarray(
+        frame[
+            panel["source_front_y"] : panel["source_front_y"] + panel["front_height"],
+            panel["source_front_x"] : panel["source_front_x"] + panel["front_width"],
+        ]
+    ).convert("RGB")
+    side = Image.fromarray(
+        frame[
+            panel["source_side_y"] : panel["source_side_y"] + panel["side_height"],
+            panel["source_side_x"] : panel["source_side_x"] + panel["side_width"],
+        ]
+    ).convert("RGB")
+    if layout == "stacked":
+        canvas = Image.new("RGB", (max(front.width, side.width), front.height + side.height))
+    else:
+        canvas = Image.new("RGB", (front.width + side.width, max(front.height, side.height)))
+    canvas.paste(front, (panel["front_x"], panel["front_y"]))
+    canvas.paste(side, (panel["side_x"], panel["side_y"]))
+    return canvas
 
 
 def draw_markers(

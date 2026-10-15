@@ -36,6 +36,15 @@ bodies, and six-degree-of-freedom Newton-Euler dynamics. Its empirical functions
 and interpolation tables are intended for the documented low-pressure,
 cryogenic-to-room-temperature regime; their stated domains must be respected.
 
+### Reproducible analyses and local artifacts
+
+`analysis/` contains maintained analysis code, currently including the SP6
+orbit workflow. `reference/` contains supplied or legacy reference material.
+Run-specific exports are grouped under `derived-data/`, generated documents
+under `generated/`, and superseded local copies under `archive/`. These artifact
+trees are intentionally excluded from ordinary Git history; their source paths
+and provenance must remain recorded in manifests.
+
 ## Experimental Geometry and Coordinates
 
 The current video workflow models the chamber as a circular frustum. The
