@@ -339,7 +339,7 @@
 
       <section class="page-masthead" data-page-section="results">
         <div><span class="page-index">04 / RESULTS</span><h2>Measure the motion.</h2><p>Attach analyzer output, run the circular-motion detector, and inspect every derived table, plot, and report in one place.</p></div>
-        <div class="masthead-stat"><span>Detector</span><b>Band-pass amplitude + winding phase</b></div>
+        <div class="masthead-stat"><span>Detector</span><b>RMS candidates + moving-center geometry</b></div>
       </section>
 
       <nav class="section-tabs results-tabs" aria-label="Results tasks" data-page-section="results">
@@ -374,7 +374,7 @@
           <label>Dataset label<input data-results-bind="label" placeholder="e.g. SP6"></label>
           <label>Particle ID <span class="optional">if multiple</span><input data-results-bind="particle" placeholder="e.g. 0"></label>
           <label>Frame rate <span class="unit">fps</span><input data-results-bind="fps" type="number" min="0.001" step="any" placeholder="Only required without time_s"></label>
-          <label>Detection threshold<input data-results-bind="threshold" placeholder="auto or radius in position units"></label>
+          <label>Candidate threshold<input data-results-bind="threshold" placeholder="auto or RMS amplitude in position units"><small class="control-help">Finds strong motion; it does not by itself prove the path is circular.</small></label>
           <label>Band low <span class="unit">Hz</span><input data-results-bind="band_low_hz" type="number" min="0.001" step="any"></label>
           <label>Band high <span class="unit">Hz</span><input data-results-bind="band_high_hz" type="number" min="0.001" step="any"></label>
           <label>Minimum episode <span class="unit">s</span><input data-results-bind="minimum_episode_s" type="number" min="0" step="any"></label>
@@ -382,7 +382,21 @@
         </div>
 
         <details class="inline-advanced">
-          <summary>Column mapping and filter details</summary>
+          <summary>Moving-center geometry checks</summary>
+          <div class="field-grid four">
+            <label>Fit window <span class="unit">s</span><input data-results-bind="fit_window_s" type="number" min="0.01" step="any"><small class="control-help">Local span over which the orbit center may move linearly.</small></label>
+            <label>Fit spacing <span class="unit">s</span><input data-results-bind="fit_step_s" type="number" min="0.001" step="any"><small class="control-help">Distance between overlapping local fits.</small></label>
+            <label>Minimum turns<input data-results-bind="fit_minimum_turns" type="number" min="0.01" step="any"><small class="control-help">Rejects short arcs that do not cover enough of an orbit.</small></label>
+            <label>Minimum axis ratio<input data-results-bind="fit_minimum_axis_ratio" type="number" min="0.001" max="1" step="any"><small class="control-help">1 is circular; values near 0 are line-like.</small></label>
+            <label>Maximum radial error<input data-results-bind="fit_maximum_normalized_radial_rmse" type="number" min="0.001" step="any"><small class="control-help">Radial RMSE divided by fitted radius; lower is stricter.</small></label>
+            <label>Direction consistency<input data-results-bind="fit_minimum_direction_consistency" type="number" min="0.001" max="1" step="any"><small class="control-help">Required fraction of angular steps moving in one direction.</small></label>
+            <label>Accepted-fit fraction<input data-results-bind="fit_minimum_accepted_fraction" type="number" min="0.001" max="1" step="any"><small class="control-help">Required fraction of local windows passing all geometry checks.</small></label>
+            <label class="check-label"><input data-results-bind="rms_only" type="checkbox"> RMS candidates only <small class="control-help">Diagnostic compatibility mode. Skips geometric validation.</small></label>
+          </div>
+        </details>
+
+        <details class="inline-advanced">
+          <summary>Column mapping and signal filter details</summary>
           <div class="field-grid four">
             <label>Time column<input data-results-bind="time_col" placeholder="auto"></label>
             <label>Frame column<input data-results-bind="frame_col" placeholder="auto"></label>
@@ -391,12 +405,12 @@
             <label>Z column<input data-results-bind="z_col" placeholder="optional / auto"></label>
             <label>Position unit<input data-results-bind="position_unit" placeholder="inferred from column suffix"></label>
             <label>Smoothing window <span class="unit">s</span><input data-results-bind="smooth_window_s" type="number" min="0" step="any"></label>
-            <label>Radius window <span class="unit">s</span><input data-results-bind="radius_window_s" type="number" min="0" step="any"></label>
+            <label>RMS window <span class="unit">s</span><input data-results-bind="radius_window_s" type="number" min="0" step="any"></label>
             <label>Maximum short gap <span class="unit">samples</span><input data-results-bind="max_gap_samples" type="number" min="0" step="1"></label>
           </div>
         </details>
 
-        <div class="detector-method-note"><b>What this detects</b><span>The radius envelope identifies sustained motion in the selected frequency band. Period comes from the fitted winding rate of ellipse-normalized XY phase. Threshold sensitivity is saved with every run.</span></div>
+        <div class="detector-method-note"><b>How acceptance works</b><span>Stage 1 uses the bandpassed RMS envelope to find motion candidates. Stage 2 explicitly fits a moving center and validates radius error, shape, angular coverage, and winding direction. Both stages and every rejected-fit reason are saved.</span></div>
         <div class="action-row results-run-row">
           <button id="runOrbitDetector" class="button primary large" data-action="orbit_analysis"><span>Run circular-motion detector</span></button>
           <span id="orbitRunHint" class="field-help">Start with automatic thresholding, then compare the reported 0.8×, 1.0×, and 1.5× boundaries.</span>
@@ -410,10 +424,11 @@
           <span id="orbitResultCheck" class="check-badge">Not run</span>
         </div>
         <div id="orbitMetricCards" class="orbit-metric-cards">
-          <div class="orbit-metric"><span>Episodes</span><b>—</b><small>waiting for analysis</small></div>
+          <div class="orbit-metric"><span>Candidates → episodes</span><b>—</b><small>waiting for analysis</small></div>
           <div class="orbit-metric"><span>Frequency</span><b>—</b><small>episode mean ± SD</small></div>
           <div class="orbit-metric"><span>Period</span><b>—</b><small>episode mean ± SD</small></div>
-          <div class="orbit-metric"><span>Radius</span><b>—</b><small>episode mean ± SD</small></div>
+          <div class="orbit-metric"><span>Circle-fit radius</span><b>—</b><small>episode mean ± SD</small></div>
+          <div class="orbit-metric"><span>Radial fit error</span><b>—</b><small>normalized RMSE</small></div>
           <div class="orbit-metric"><span>Duty cycle</span><b>—</b><small>fraction classified as orbit</small></div>
         </div>
         <div id="orbitInteractiveShell" class="embedded-report-shell hidden">

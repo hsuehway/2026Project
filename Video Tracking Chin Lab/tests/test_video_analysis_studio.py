@@ -157,7 +157,13 @@ class PlannerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repository_root = Path(temporary)
             root = repository_root / "Video Tracking Chin Lab"
-            detector = repository_root / "orbit" / "code" / "analyze_orbits_from_csv.py"
+            detector = (
+                repository_root
+                / "analysis"
+                / "orbit-detection"
+                / "code"
+                / "analyze_orbits_from_csv.py"
+            )
             detector.parent.mkdir(parents=True)
             detector.touch()
             root.mkdir()
@@ -175,6 +181,10 @@ class PlannerTests(unittest.TestCase):
                     "band_low_hz": 1.0,
                     "band_high_hz": 4.0,
                     "threshold": "auto",
+                    "fit_window_s": 2.0,
+                    "fit_minimum_axis_ratio": 0.7,
+                    "fit_maximum_normalized_radial_rmse": 0.25,
+                    "rms_only": True,
                 },
                 "artifacts": {},
             }
@@ -184,6 +194,17 @@ class PlannerTests(unittest.TestCase):
             self.assertEqual(Path(command[1]).resolve(), detector.resolve())
             self.assertEqual(command[command.index("--fps") + 1], "120")
             self.assertEqual(command[command.index("--particle") + 1], "0")
+            self.assertEqual(command[command.index("--fit-window-s") + 1], "2.0")
+            self.assertEqual(
+                command[command.index("--fit-minimum-axis-ratio") + 1], "0.7"
+            )
+            self.assertEqual(
+                command[
+                    command.index("--fit-maximum-normalized-radial-rmse") + 1
+                ],
+                "0.25",
+            )
+            self.assertIn("--rms-only", command)
             self.assertEqual(Path(command[command.index("--video") + 1]), video.resolve())
             self.assertIn("orbit_report_html", plan.steps[0].artifacts)
             self.assertIn("orbit_source_video", plan.steps[0].artifacts)

@@ -125,7 +125,13 @@ class PipelinePlanner:
         if not source.is_file() or source.suffix.lower() != ".csv":
             raise FileNotFoundError(f"Position CSV does not exist: {source}")
 
-        detector = self.root.parent / "orbit" / "code" / "analyze_orbits_from_csv.py"
+        detector = (
+            self.root.parent
+            / "analysis"
+            / "orbit-detection"
+            / "code"
+            / "analyze_orbits_from_csv.py"
+        )
         if not detector.is_file():
             raise FileNotFoundError(f"Circular-motion detector was not found: {detector}")
 
@@ -165,9 +171,27 @@ class PipelinePlanner:
             ("--merge-gap-s", "merge_gap_s"),
             ("--smooth-window-s", "smooth_window_s"),
             ("--radius-window-s", "radius_window_s"),
+            ("--fit-window-s", "fit_window_s"),
+            ("--fit-step-s", "fit_step_s"),
+            ("--fit-minimum-turns", "fit_minimum_turns"),
+            ("--fit-minimum-axis-ratio", "fit_minimum_axis_ratio"),
+            (
+                "--fit-maximum-normalized-radial-rmse",
+                "fit_maximum_normalized_radial_rmse",
+            ),
+            (
+                "--fit-minimum-direction-consistency",
+                "fit_minimum_direction_consistency",
+            ),
+            (
+                "--fit-minimum-accepted-fraction",
+                "fit_minimum_accepted_fraction",
+            ),
             ("--max-gap-samples", "max_gap_samples"),
         ):
             command += _optional_arg(flag, settings.get(key))
+        if _truthy(settings.get("rms_only")):
+            command.append("--rms-only")
 
         output_artifacts: dict[str, str | list[str]] = {
             "orbit_intervals_csv": str(output_dir / "orbit_intervals.csv"),

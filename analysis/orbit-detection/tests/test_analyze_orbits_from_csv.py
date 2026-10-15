@@ -50,9 +50,17 @@ def test_detects_two_synthetic_orbit_bursts(tmp_path: Path) -> None:
         no_html=False,
     )
     summary = MODULE.analyze(args)
+    derived = pd.read_csv(output / "orbit_timeseries.csv")
+    intervals = pd.read_csv(output / "orbit_intervals.csv")
+    assert summary["candidate_episode_count"] == 2
     assert summary["episode_count"] == 2
     assert abs(summary["frequency_hz"]["mean"] - 2.0) < 0.03
     assert abs(summary["radius_mm"]["mean"] - 1.8) < 0.08
+    assert abs(summary["circle_fit_radius_mm"]["mean"] - 1.8) < 0.08
+    assert intervals["circle_fit_normalized_radial_rmse"].max() < 0.10
+    assert "rolling_center_x_mm" in derived
+    assert "rolling_circle_radius_mm" in derived
+    assert "rolling_circle_fit_accepted" in derived
     assert (output / "orbit_intervals.csv").is_file()
     assert (output / "orbit_timeseries.csv").is_file()
     assert (output / "orbit_summary.json").is_file()

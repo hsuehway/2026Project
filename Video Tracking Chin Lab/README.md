@@ -139,6 +139,15 @@ browser playback does not depend on MKV support; the video frames are not
 re-encoded.
 The source CSV and companion video are never modified.
 
+Circular-motion analysis uses two explicit stages. First, the bandpassed rolling
+RMS amplitude finds candidate motion; this value is not labeled as a geometric
+radius. Second, overlapping local fits model a linearly moving center plus the
+orbital harmonic and check radial residual, axis ratio, angular coverage, and
+winding consistency. The Results page exposes every geometry threshold and an
+**RMS candidates only** compatibility mode. Reports distinguish candidate
+intervals from validated episodes, show the moving-center circle-fit radius,
+and retain each local fit and rejection reason in `orbit_timeseries.csv`.
+
 ## Translational Force Studio
 
 The single-particle radius estimator is part of the existing Translational

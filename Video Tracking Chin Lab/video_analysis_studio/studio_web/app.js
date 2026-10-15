@@ -487,21 +487,23 @@
   }
 
   function orbitMetricMarkup(summary) {
-    if (!summary) return ["Episodes", "Frequency", "Period", "Radius", "Duty cycle"].map(label => `<div class="orbit-metric"><span>${label}</span><b>—</b><small>waiting for analysis</small></div>`).join("");
+    if (!summary) return ["Candidates → episodes", "Frequency", "Period", "Circle-fit radius", "Radial fit error", "Duty cycle"].map(label => `<div class="orbit-metric"><span>${label}</span><b>—</b><small>waiting for analysis</small></div>`).join("");
     const unit = summary.position_unit || "unit";
     const unitKey = String(unit).trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unit";
-    const radius = summary[`radius_${unitKey}`] || {};
+    const radius = summary[`circle_fit_radius_${unitKey}`] || summary[`radius_${unitKey}`] || {};
+    const radialError = summary.circle_fit_normalized_radial_rmse || {};
     const stat = (entry, suffix, digits = 3) => {
       if (!Number.isFinite(entry?.mean)) return "—";
       const spread = Number.isFinite(entry.standard_deviation) ? ` ± ${round(entry.standard_deviation, digits)}` : "";
       return `${round(entry.mean, digits)}${spread} ${suffix}`.trim();
     };
     return [
-      ["Episodes", String(summary.episode_count ?? "—"), `${round((summary.orbit_duty_cycle || 0) * 100, 1)}% of recording`],
+      ["Candidates → episodes", `${summary.candidate_episode_count ?? "—"} → ${summary.episode_count ?? "—"}`, "RMS stage → geometry-validated"],
       ["Frequency", stat(summary.frequency_hz, "Hz"), "episode mean ± SD"],
       ["Period", stat(summary.period_s, "s"), "episode mean ± SD"],
-      ["Radius", stat(radius, unit), "episode median mean ± SD"],
-      ["Duty cycle", formatPercent(summary.orbit_duty_cycle), `${summary.threshold?.value ?? "—"} ${unit} threshold`],
+      ["Circle-fit radius", stat(radius, unit), "moving-center geometric estimate"],
+      ["Radial fit error", stat(radialError, "", 3), "RMSE ÷ fitted radius; lower is better"],
+      ["Duty cycle", formatPercent(summary.orbit_duty_cycle), `${summary.threshold?.value ?? "—"} ${unit} RMS threshold`],
     ].map(([label, value, note]) => `<div class="orbit-metric"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b><small>${escapeHtml(note)}</small></div>`).join("");
   }
 

@@ -78,11 +78,15 @@ The intended evidence chain is:
 5. Reconstruct and link 3-D trajectories while preserving raw detections.
 6. Review front/side vertical disagreement, gaps, identity switches, and video
    overlays before accepting trajectories.
-7. Calculate smoothed positions, velocities, accelerations, and rotation as
+7. Treat bandpassed rolling RMS as an oscillation-amplitude candidate signal,
+   not as proof of a circle. For orbit claims, validate candidates with an
+   explicit local-center geometric fit and retain its residual, axis ratio,
+   angular coverage, and winding diagnostics.
+8. Calculate smoothed positions, velocities, accelerations, and rotation as
    explicitly labeled derived quantities.
-8. Perform force or model inference only after trajectory quality and physical
+9. Perform force or model inference only after trajectory quality and physical
    inputs have passed their checks.
-9. Compare with simulation while retaining model version, parameters, units,
+10. Compare with simulation while retaining model version, parameters, units,
    reference data, and numerical tolerances.
 
 ## Canonical Evidence

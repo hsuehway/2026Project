@@ -3,7 +3,9 @@
 
 The input file is never modified. The script writes a derived time series,
 one row per detected orbit, a JSON summary, diagnostic figures, and a compact
-HTML report to a separate output directory.
+HTML report to a separate output directory.  A band-pass RMS envelope finds
+candidate motion; an explicit rolling moving-center fit then validates geometry
+and estimates local center, drift, radius, frequency, and residual error.
 
 At minimum the input needs X and Y position plus either time in seconds or a
 frame number with an explicitly supplied frame rate. Common column names are
@@ -97,12 +99,43 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--threshold",
         default="auto",
-        help="Orbit-radius threshold in position units, or 'auto'",
+        help="Oscillation-amplitude threshold in position units, or 'auto'",
     )
     parser.add_argument("--minimum-episode-s", type=float, default=2.0)
     parser.add_argument("--merge-gap-s", type=float, default=0.75)
     parser.add_argument("--smooth-window-s", type=float, default=0.10)
     parser.add_argument("--radius-window-s", type=float, default=0.50)
+    parser.add_argument(
+        "--fit-window-s",
+        type=float,
+        default=2.0,
+        help="Duration of each explicit moving-center geometry fit",
+    )
+    parser.add_argument(
+        "--fit-step-s",
+        type=float,
+        default=0.25,
+        help="Spacing between fitted window centers",
+    )
+    parser.add_argument("--fit-minimum-turns", type=float, default=1.5)
+    parser.add_argument("--fit-minimum-axis-ratio", type=float, default=0.70)
+    parser.add_argument(
+        "--fit-maximum-normalized-radial-rmse", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--fit-minimum-direction-consistency", type=float, default=0.80
+    )
+    parser.add_argument(
+        "--fit-minimum-accepted-fraction",
+        type=float,
+        default=0.60,
+        help="Fraction of local fit windows that must pass within an RMS candidate",
+    )
+    parser.add_argument(
+        "--rms-only",
+        action="store_true",
+        help="Keep RMS candidate intervals without geometric validation",
+    )
     parser.add_argument("--max-gap-samples", type=int, default=2)
     parser.add_argument(
         "--no-html", action="store_true", help="Do not create orbit_report.html"
@@ -388,6 +421,7 @@ def make_plots(
     oscillatory: np.ndarray,
     radius_envelope: np.ndarray,
     threshold: float,
+    candidate_intervals: list[tuple[int, int]],
     intervals: list[tuple[int, int]],
     sample_rate_hz: float,
     band: tuple[float, float],
@@ -401,10 +435,10 @@ def make_plots(
         axes[0].plot(time_s, positions[:, axis_index], lw=0.65, label=name)
     axes[0].set_ylabel(f"position [{unit}]")
     axes[0].legend(ncol=3)
-    axes[0].set_title(f"{label}: position and detected circular motion")
+    axes[0].set_title(f"{label}: RMS candidates and geometrically validated motion")
     axes[1].plot(time_s, radius_envelope, color="#4b62a1", lw=0.8)
     axes[1].axhline(threshold, color="black", ls="--", lw=0.9, label="detection threshold")
-    axes[1].set_ylabel(f"orbit radius envelope [{unit}]")
+    axes[1].set_ylabel(f"RMS candidate amplitude [{unit}]")
     axes[1].legend()
     frequencies, psd_x = signal.welch(oscillatory[:, 0], fs=sample_rate_hz, nperseg=min(len(time_s), 4096))
     _, psd_y = signal.welch(oscillatory[:, 1], fs=sample_rate_hz, nperseg=min(len(time_s), 4096))
@@ -416,6 +450,8 @@ def make_plots(
     axes[2].set_ylabel(f"coordinate power [{unit}²/Hz]")
     axes[2].grid(alpha=0.2)
     for axis in axes[:2]:
+        for start, end in candidate_intervals:
+            axis.axvspan(time_s[start], time_s[end], color="#d7a534", alpha=0.08)
         for start, end in intervals:
             axis.axvspan(time_s[start], time_s[end], color="#36a269", alpha=0.14)
     fig.savefig(output_dir / "orbit_diagnostic.png", dpi=170)
@@ -458,27 +494,32 @@ def make_html_report(
     unit: str,
     source_video: Path | None = None,
 ) -> None:
-    radius_column = f"radius_median_{safe_unit(unit)}"
+    amplitude_column = f"radius_median_{safe_unit(unit)}"
+    circle_radius_column = f"circle_fit_radius_{safe_unit(unit)}"
     rows = []
     for row in episodes.to_dict(orient="records"):
         rows.append(
             "<tr>"
             f"<td>{int(row['episode'])}</td><td>{row['start_s']:.3f}</td><td>{row['end_s']:.3f}</td>"
             f"<td>{row['period_s']:.4f}</td><td>{row['frequency_hz']:.4f}</td>"
-            f"<td>{row[radius_column]:.4f}</td><td>{row['xy_circularity']:.3f}</td>"
+            f"<td>{row[amplitude_column]:.4f}</td><td>{row[circle_radius_column]:.4f}</td>"
+            f"<td>{row['circle_fit_normalized_radial_rmse']:.3f}</td>"
+            f"<td>{row['circle_fit_axis_ratio']:.3f}</td>"
             f"<td>{html.escape(str(row['direction_xy']))}</td></tr>"
         )
     if not rows:
-        rows.append('<tr><td colspan="8">No orbit episodes met the configured criteria.</td></tr>')
+        rows.append('<tr><td colspan="10">No orbit episodes met the configured criteria.</td></tr>')
     frequency = summary["frequency_hz"]
     period = summary["period_s"]
-    radius = summary[f"radius_{safe_unit(unit)}"]
+    radius = summary[f"circle_fit_radius_{safe_unit(unit)}"]
+    amplitude = summary[f"radius_{safe_unit(unit)}"]
     frequency_mean = "n.a." if frequency["mean"] is None else f"{frequency['mean']:.4f}"
     frequency_sd = "n.a." if frequency["standard_deviation"] is None else f"{frequency['standard_deviation']:.4f}"
     period_mean = "n.a." if period["mean"] is None else f"{period['mean']:.4f}"
     period_sd = "n.a." if period["standard_deviation"] is None else f"{period['standard_deviation']:.4f}"
     radius_mean = "n.a." if radius["mean"] is None else f"{radius['mean']:.4f}"
     radius_sd = "n.a." if radius["standard_deviation"] is None else f"{radius['standard_deviation']:.4f}"
+    amplitude_mean = "n.a." if amplitude["mean"] is None else f"{amplitude['mean']:.4f}"
     unit_key = safe_unit(unit)
     x_column = f"position_x_smoothed_{unit_key}"
     y_column = f"position_y_smoothed_{unit_key}"
@@ -487,6 +528,7 @@ def make_html_report(
     y_raw_column = f"position_y_{unit_key}"
     z_raw_column = f"position_z_{unit_key}"
     radius_envelope_column = f"orbit_radius_envelope_{unit_key}"
+    rolling_radius_column = f"rolling_circle_radius_{unit_key}"
     sample_stride = max(1, int(round(summary["sample_rate_hz"] / 30.0)))
     compact = derived.iloc[::sample_stride].copy()
     if len(derived) and compact.index[-1] != derived.index[-1]:
@@ -505,6 +547,10 @@ def make_html_report(
                 round(float(row[radius_envelope_column]), 7),
                 int(row["orbit_episode"]),
                 int(row["source_row_index"]),
+                finite_or_none(row[rolling_radius_column]),
+                finite_or_none(row["rolling_circle_normalized_radial_rmse"]),
+                bool(row["rolling_circle_fit_accepted"]),
+                str(row["rolling_circle_fit_status"]),
             ]
         )
     camera_columns = (
@@ -535,7 +581,8 @@ def make_html_report(
         "samples": samples,
         "sampleFields": [
             "time", "xRaw", "yRaw", "zRaw", "x", "y", "z",
-            "radius", "episode", "sourceRow"
+            "rmsAmplitude", "episode", "sourceRow", "circleRadius",
+            "normalizedRadialRmse", "fitAccepted", "fitStatus"
         ],
         "cameraFields": list(camera_columns) if has_camera_pixels else [],
         "cameraSamples": camera_samples,
@@ -584,26 +631,27 @@ details.supporting{{margin:14px 0;background:var(--panel);border:1px solid var(-
 @media(max-width:680px){{.viewer-grid,.support-grid{{grid-template-columns:1fr}} body{{padding:12px}}}}
 </style></head><body>
 <h1>{html.escape(label)} orbit report</h1>
-<p class="lede">Play the unobstructed recording while the detected mode, tracked path, radius envelope, and nearest analysis row update together.</p>
+<p class="lede">Play the unobstructed recording while the geometrically validated mode, tracked path, RMS candidate amplitude, moving-center circle fit, and nearest analysis row update together.</p>
 {calibration_warning}
 <div class="viewer-grid">
   <div class="panel"><h2>Original video</h2><div class="video-shell"><video id="video" controls preload="metadata"{video_attribute}></video></div><div class="toolbar"><button id="previousEpisode">Previous orbit</button><button id="nextEpisode">Next orbit</button><span id="mode" class="mode">waiting for video</span></div><canvas id="timeline" class="chart" height="92"></canvas></div>
-  <div class="panel"><h2>{path_title}</h2><div class="view-controls" id="pathViews"></div><div class="view-controls" id="pathScales"><span class="note">Scale:</span><button data-scale="local" aria-pressed="true">Zoomed-out local view</button><button data-scale="overview" aria-pressed="false">Whole run</button></div><p id="pathWindow" class="note"></p><canvas id="path" class="chart" height="300"></canvas><div class="live-grid"><div class="live"><span>Video / data time</span><strong id="timeValue">—</strong></div><div class="live"><span>Nearest source row</span><strong id="rowValue">—</strong></div><div class="live"><span id="rawPositionLabel">Raw XYZ</span><strong id="rawPositionValue">—</strong></div><div class="live"><span id="smoothPositionLabel">Smoothed XYZ</span><strong id="positionValue">—</strong></div><div class="live"><span>Orbit radius envelope</span><strong id="radiusValue">—</strong></div><div class="live"><span>Episode period</span><strong id="periodValue">—</strong></div><div class="live"><span>Classification</span><strong id="classValue">—</strong></div></div></div>
+  <div class="panel"><h2>{path_title}</h2><div class="view-controls" id="pathViews"></div><div class="view-controls" id="pathScales"><span class="note">Scale:</span><button data-scale="local" aria-pressed="true">Zoomed-out local view</button><button data-scale="overview" aria-pressed="false">Whole run</button></div><p id="pathWindow" class="note"></p><canvas id="path" class="chart" height="300"></canvas><div class="live-grid"><div class="live"><span>Video / data time</span><strong id="timeValue">—</strong></div><div class="live"><span>Nearest source row</span><strong id="rowValue">—</strong></div><div class="live"><span id="rawPositionLabel">Raw XYZ</span><strong id="rawPositionValue">—</strong></div><div class="live"><span id="smoothPositionLabel">Smoothed XYZ</span><strong id="positionValue">—</strong></div><div class="live"><span>RMS candidate amplitude</span><strong id="radiusValue">—</strong></div><div class="live"><span>Moving-center circle radius</span><strong id="circleRadiusValue">—</strong></div><div class="live"><span>Normalized radial error</span><strong id="radialErrorValue">—</strong></div><div class="live"><span>Geometry fit</span><strong id="fitStatusValue">—</strong></div><div class="live"><span>Episode period</span><strong id="periodValue">—</strong></div><div class="live"><span>Classification</span><strong id="classValue">—</strong></div></div></div>
 </div>
 <div class="cards">
-<div class="card">Orbit episodes<strong>{summary['episode_count']}</strong></div>
+<div class="card">Validated orbits<strong>{summary['episode_count']}</strong><span>{summary['candidate_episode_count']} RMS candidates</span></div>
 <div class="card">Frequency<strong>{frequency_mean} Hz</strong><span>episode SD: {frequency_sd}</span></div>
 <div class="card">Period<strong>{period_mean} s</strong><span>episode SD: {period_sd}</span></div>
-<div class="card">Radius<strong>{radius_mean} {html.escape(unit)}</strong><span>episode SD: {radius_sd}</span></div>
+<div class="card">Circle-fit radius<strong>{radius_mean} {html.escape(unit)}</strong><span>episode SD: {radius_sd}</span></div>
+<div class="card">RMS amplitude<strong>{amplitude_mean} {html.escape(unit)}</strong><span>candidate signal, not geometric radius</span></div>
 <div class="card">Recurrence<strong>{recurrence_text}</strong><span>episode-center spacing</span></div>
 <div class="card">Orbit duty cycle<strong>{100 * summary['orbit_duty_cycle']:.1f}%</strong><span>threshold classification</span></div>
 </div>
-<section><h2>Orbit amplitude and detected intervals</h2><canvas id="signal" class="chart" height="270"></canvas></section>
-<section><h2>Orbit episodes</h2><div style="overflow:auto"><table><thead><tr><th>Episode</th><th>Start [s]</th><th>End [s]</th><th>Period [s]</th><th>Frequency [Hz]</th><th>Radius [{html.escape(unit)}]</th><th>Circularity</th><th>Direction</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
-<section><h2>Nearest analysis rows</h2><div class="table-wrap"><table><thead><tr><th>Time [s]</th><th>Selected raw coordinates [{html.escape(unit)}]</th><th>Selected smoothed coordinates [{html.escape(unit)}]</th><th>Radius [{html.escape(unit)}]</th><th>Episode</th></tr></thead><tbody id="nearbyRows"></tbody></table></div></section>
+<section><h2>RMS candidate amplitude and validated intervals</h2><canvas id="signal" class="chart" height="270"></canvas></section>
+<section><h2>Validated orbit episodes</h2><div style="overflow:auto"><table><thead><tr><th>Episode</th><th>Start [s]</th><th>End [s]</th><th>Period [s]</th><th>Frequency [Hz]</th><th>RMS amplitude [{html.escape(unit)}]</th><th>Circle radius [{html.escape(unit)}]</th><th>Radial error / radius</th><th>Axis ratio</th><th>Direction</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
+<section><h2>Nearest analysis rows</h2><div class="table-wrap"><table><thead><tr><th>Time [s]</th><th>Selected raw coordinates [{html.escape(unit)}]</th><th>Selected smoothed coordinates [{html.escape(unit)}]</th><th>RMS amplitude [{html.escape(unit)}]</th><th>Episode</th></tr></thead><tbody id="nearbyRows"></tbody></table></div></section>
 <details class="supporting"><summary>Supporting diagnostic images</summary><div class="support-grid"><img src="orbit_diagnostic.png" alt="Position, orbit amplitude, and frequency diagnostic"><img src="orbit_xy.png" alt="Detected XY orbit paths"></div></details>
 <section><h2>Files and method</h2><p><a href="orbit_intervals.csv">Orbit intervals CSV</a> · <a href="orbit_timeseries.csv">Derived time series CSV</a> · <a href="orbit_summary.json">JSON summary</a></p>
-<p class="note">Circular motion is detected from the {summary['parameters']['band_low_hz']}–{summary['parameters']['band_high_hz']} Hz XY band-pass radius envelope. The reported radius is the episode median of that envelope. Frequency comes from a linear fit to unwrapped, ellipse-normalized phase. Boundaries are detector-dependent; inspect the threshold sensitivity in the JSON summary.</p></section>
+<p class="note">The {summary['parameters']['band_low_hz']}–{summary['parameters']['band_high_hz']} Hz XY band-pass RMS envelope finds candidate motion only. Accepted windows must also pass the explicit moving-center harmonic fit, radial-error, axis-ratio, angular-coverage, and winding checks. Boundaries remain detector-dependent; inspect the settings and threshold sensitivity in the JSON summary.</p></section>
 <script id="report-data" type="application/json">{embedded_data}</script>
 <script>
 (() => {{
@@ -626,7 +674,7 @@ details.supporting{{margin:14px 0;background:var(--panel);border:1px solid var(-
     const axisLabel=cameraPixels?(view==='horizontal'?['front horizontal','side horizontal']:view==='front'?['front horizontal','front vertical']:['side horizontal','side vertical']):(view==='xy'?['x','y']:view==='xz'?['x','z']:['y','z']);c.textAlign='center';c.fillText(`${{axisLabel[0]}} [${{cameraPixels?'px':unit}}]`,(m.l+w-m.r)/2,h-7);c.save();c.translate(13,(m.t+h-m.b)/2);c.rotate(-Math.PI/2);c.fillText(`${{axisLabel[1]}} [${{cameraPixels?'px':unit}}]`,0,0);c.restore();
     c.save();c.beginPath();c.rect(m.l,m.t,availableWidth,availableHeight);c.clip();for(let k=1;k<indexed.length;k++){{const a=indexed[k-1][1],b=indexed[k][1],fraction=k/(indexed.length-1);c.strokeStyle=`rgba(101,169,255,${{(.16+.72*fraction).toFixed(3)}})`;c.lineWidth=1.2+1.5*fraction;c.beginPath();c.moveTo(sx(a[axes[0]]),sy(a[axes[1]]));c.lineTo(sx(b[axes[0]]),sy(b[axes[1]]));c.stroke()}}const first=indexed[0][1];c.strokeStyle='#91a6b5';c.lineWidth=1.2;c.beginPath();c.arc(sx(first[axes[0]]),sy(first[axes[1]]),3.5,0,Math.PI*2);c.stroke();const px=sx(current[axes[0]]),py=sy(current[axes[1]]);c.fillStyle='rgba(69,224,157,.2)';c.beginPath();c.arc(px,py,10,0,Math.PI*2);c.fill();c.fillStyle='#45e09d';c.beginPath();c.arc(px,py,5,0,Math.PI*2);c.fill();c.strokeStyle='#e8f1f7';c.lineWidth=1;c.stroke();c.restore();
   }}
-  function drawSignal(i){{const [c,w,h]=canvas(signal),m={{l:54,r:18,t:16,b:35}},a=S[0][0],b=S[S.length-1][0],max=S.reduce((value,row)=>Math.max(value,row[7]),summary.threshold.value*1.7),x=t=>m.l+(t-a)/(b-a)*(w-m.l-m.r),y=v=>m.t+(1-v/max)*(h-m.t-m.b);c.fillStyle='#071421';c.fillRect(0,0,w,h);E.forEach(e=>{{c.fillStyle='rgba(69,224,157,.12)';c.fillRect(x(e.start_s),m.t,x(e.end_s)-x(e.start_s),h-m.t-m.b)}});c.strokeStyle='#65a9ff';c.beginPath();S.forEach((r,j)=>{{j?c.lineTo(x(r[0]),y(r[7])):c.moveTo(x(r[0]),y(r[7]))}});c.stroke();c.setLineDash([5,4]);c.strokeStyle='#f0bd68';c.beginPath();c.moveTo(m.l,y(summary.threshold.value));c.lineTo(w-m.r,y(summary.threshold.value));c.stroke();c.setLineDash([]);c.strokeStyle='#fff';c.beginPath();c.moveTo(x(S[i][0]),m.t);c.lineTo(x(S[i][0]),h-m.b);c.stroke();c.fillStyle='#91a6b5';c.fillText(`radius envelope [${{unit}}]`,8,12)}}
+  function drawSignal(i){{const [c,w,h]=canvas(signal),m={{l:54,r:18,t:16,b:35}},a=S[0][0],b=S[S.length-1][0],max=S.reduce((value,row)=>Math.max(value,row[7]),summary.threshold.value*1.7),x=t=>m.l+(t-a)/(b-a)*(w-m.l-m.r),y=v=>m.t+(1-v/max)*(h-m.t-m.b);c.fillStyle='#071421';c.fillRect(0,0,w,h);E.forEach(e=>{{c.fillStyle='rgba(69,224,157,.12)';c.fillRect(x(e.start_s),m.t,x(e.end_s)-x(e.start_s),h-m.t-m.b)}});c.strokeStyle='#65a9ff';c.beginPath();S.forEach((r,j)=>{{j?c.lineTo(x(r[0]),y(r[7])):c.moveTo(x(r[0]),y(r[7]))}});c.stroke();c.setLineDash([5,4]);c.strokeStyle='#f0bd68';c.beginPath();c.moveTo(m.l,y(summary.threshold.value));c.lineTo(w-m.r,y(summary.threshold.value));c.stroke();c.setLineDash([]);c.strokeStyle='#fff';c.beginPath();c.moveTo(x(S[i][0]),m.t);c.lineTo(x(S[i][0]),h-m.b);c.stroke();c.fillStyle='#91a6b5';c.fillText(`RMS candidate amplitude [${{unit}}]`,8,12)}}
   function update(){{
     if(!S.length)return;
     const rawTime=Number.isFinite(video.currentTime)?video.currentTime:S[0][0],inTrackedRange=rawTime>=S[0][0]&&rawTime<=S[S.length-1][0],t=Math.max(S[0][0],Math.min(S[S.length-1][0],rawTime)),i=nearest(t),r=S[i],ep=inTrackedRange?episodeAt(t):null,camera=cameraPixels?C[i]:null;
@@ -637,6 +685,9 @@ details.supporting{{margin:14px 0;background:var(--panel);border:1px solid var(-
     document.getElementById('rawPositionValue').textContent=!inTrackedRange?'no tracking data':cameraPixels?`F(${{fmt(camera[0],2)}}, ${{fmt(camera[1],2)}}) · S(${{fmt(camera[2],2)}}, ${{fmt(camera[3],2)}}) px`:`${{fmt(r[1],4)}}, ${{fmt(r[2],4)}}, ${{fmt(r[3],4)}} ${{unit}}`;
     document.getElementById('positionValue').textContent=!inTrackedRange?'no tracking data':cameraPixels?`F(${{fmt(camera[4],2)}}, ${{fmt(camera[5],2)}}) · S(${{fmt(camera[6],2)}}, ${{fmt(camera[7],2)}}) px`:`${{fmt(r[4],4)}}, ${{fmt(r[5],4)}}, ${{fmt(r[6],4)}} ${{unit}}`;
     document.getElementById('radiusValue').textContent=inTrackedRange?`${{fmt(r[7],5)}} ${{unit}}`:'no tracking data';
+    document.getElementById('circleRadiusValue').textContent=inTrackedRange&&r[10]!=null?`${{fmt(r[10],5)}} ${{unit}}`:'not fitted';
+    document.getElementById('radialErrorValue').textContent=inTrackedRange&&r[11]!=null?fmt(r[11],4):'not fitted';
+    document.getElementById('fitStatusValue').textContent=inTrackedRange?r[13]:'no tracking data';
     document.getElementById('periodValue').textContent=!inTrackedRange?'no tracking data':ep?`${{fmt(ep.period_s,4)}} s (${{fmt(ep.frequency_hz,3)}} Hz)`:'not in detected orbit';
     document.getElementById('classValue').textContent=!inTrackedRange?'outside tracked interval':ep?`orbit ${{ep.episode}}`:'not orbit';
     const mode=document.getElementById('mode');mode.textContent=ep?`Circular orbit ${{ep.episode}}`:(rawTime<S[0][0]||rawTime>S[S.length-1][0]?'Outside tracked interval':'Not classified as orbit');mode.className='mode'+(ep?' orbit':'');
@@ -662,6 +713,21 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         fail("--fps must be positive")
     if args.max_gap_samples < 0:
         fail("--max-gap-samples cannot be negative")
+
+    fit_window_s = float(getattr(args, "fit_window_s", 2.0))
+    fit_step_s = float(getattr(args, "fit_step_s", 0.25))
+    fit_minimum_turns = float(getattr(args, "fit_minimum_turns", 1.5))
+    fit_minimum_axis_ratio = float(getattr(args, "fit_minimum_axis_ratio", 0.70))
+    fit_maximum_normalized_radial_rmse = float(
+        getattr(args, "fit_maximum_normalized_radial_rmse", 0.25)
+    )
+    fit_minimum_direction_consistency = float(
+        getattr(args, "fit_minimum_direction_consistency", 0.80)
+    )
+    fit_minimum_accepted_fraction = float(
+        getattr(args, "fit_minimum_accepted_fraction", 0.60)
+    )
+    rms_only = bool(getattr(args, "rms_only", False))
 
     output_dir = args.output_dir or args.csv.with_name(args.csv.stem + "_orbit_results")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -730,6 +796,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             merge_gap_s=args.merge_gap_s,
             smooth_window_s=args.smooth_window_s,
             radius_window_s=args.radius_window_s,
+            fit_window_s=fit_window_s,
+            fit_step_s=fit_step_s,
+            fit_minimum_turns=fit_minimum_turns,
+            fit_minimum_axis_ratio=fit_minimum_axis_ratio,
+            fit_maximum_normalized_radial_rmse=(
+                fit_maximum_normalized_radial_rmse
+            ),
+            fit_minimum_direction_consistency=fit_minimum_direction_consistency,
+            fit_minimum_accepted_fraction=fit_minimum_accepted_fraction,
+            validate_geometry=not rms_only,
         )
     except ValueError as exc:
         fail(str(exc))
@@ -739,9 +815,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     smooth_samples = statistics.smooth_samples
     threshold = statistics.threshold
     threshold_method = statistics.threshold_method
+    candidate_intervals = statistics.candidate_intervals
     intervals = statistics.intervals
     sensitivity = statistics.boundary_sensitivity
     episode_rows = statistics.episode_rows
+    rolling_fit = statistics.rolling_fit
     if episode_rows:
         episodes = pd.DataFrame(episode_rows)
     else:
@@ -766,6 +844,22 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "phase_fit_residual_rad",
             f"median_orbit_speed_{unit_key}_per_s",
             f"center_drift_speed_{unit_key}_per_s",
+            f"circle_fit_radius_{unit_key}",
+            f"circle_fit_major_radius_{unit_key}",
+            f"circle_fit_minor_radius_{unit_key}",
+            "circle_fit_axis_ratio",
+            f"circle_fit_radial_rmse_{unit_key}",
+            "circle_fit_normalized_radial_rmse",
+            f"circle_fit_position_rmse_{unit_key}",
+            "circle_fit_frequency_hz",
+            "circle_fit_turns",
+            "circle_fit_angular_coverage_deg",
+            "circle_fit_direction_consistency",
+            f"circle_fit_center_x_{unit_key}",
+            f"circle_fit_center_y_{unit_key}",
+            f"circle_fit_center_vx_{unit_key}_per_s",
+            f"circle_fit_center_vy_{unit_key}_per_s",
+            "circle_fit_acceptance_fraction",
         ]
         if coordinates.shape[1] > 2:
             episode_columns.append(f"center_z_{unit_key}")
@@ -775,6 +869,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     episode_number = np.zeros(len(grid_time), dtype=int)
     for number, (start, end) in enumerate(intervals, start=1):
         episode_number[start : end + 1] = number
+    candidate_episode_number = np.zeros(len(grid_time), dtype=int)
+    for number, (start, end) in enumerate(candidate_intervals, start=1):
+        candidate_episode_number[start : end + 1] = number
     derived = pd.DataFrame(
         {
             "time_s": grid_time,
@@ -787,6 +884,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             f"orbit_band_x_{unit_key}": oscillatory[:, 0],
             f"orbit_band_y_{unit_key}": oscillatory[:, 1],
             f"orbit_radius_envelope_{unit_key}": radius_envelope,
+            "rms_candidate_episode": candidate_episode_number,
+            "is_rms_candidate": candidate_episode_number > 0,
+            "rolling_circle_fit_available": rolling_fit.available,
+            "rolling_circle_fit_accepted": rolling_fit.accepted,
+            "rolling_circle_fit_status": rolling_fit.status,
+            f"rolling_center_x_{unit_key}": rolling_fit.center_x,
+            f"rolling_center_y_{unit_key}": rolling_fit.center_y,
+            f"rolling_center_vx_{unit_key}_per_s": rolling_fit.center_vx,
+            f"rolling_center_vy_{unit_key}_per_s": rolling_fit.center_vy,
+            f"rolling_circle_radius_{unit_key}": rolling_fit.radius,
+            f"rolling_ellipse_major_radius_{unit_key}": rolling_fit.major_radius,
+            f"rolling_ellipse_minor_radius_{unit_key}": rolling_fit.minor_radius,
+            "rolling_circle_axis_ratio": rolling_fit.axis_ratio,
+            f"rolling_circle_radial_rmse_{unit_key}": rolling_fit.radial_rmse,
+            "rolling_circle_normalized_radial_rmse": (
+                rolling_fit.normalized_radial_rmse
+            ),
+            f"rolling_harmonic_position_rmse_{unit_key}": rolling_fit.position_rmse,
+            "rolling_circle_frequency_hz": rolling_fit.frequency_hz,
+            "rolling_circle_turns": rolling_fit.turns,
+            "rolling_circle_angular_coverage_deg": rolling_fit.angular_coverage_deg,
+            "rolling_circle_direction_consistency": (
+                rolling_fit.direction_consistency
+            ),
             "orbit_episode": episode_number,
             "in_orbit": episode_number > 0,
         }
@@ -850,6 +971,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     period_values = episodes["period_s"].to_numpy(dtype=float) if len(episodes) else np.array([])
     radius_column = f"radius_median_{unit_key}"
     radius_values = episodes[radius_column].to_numpy(dtype=float) if len(episodes) else np.array([])
+    circle_fit_radius_column = f"circle_fit_radius_{unit_key}"
+    circle_fit_radius_values = (
+        episodes[circle_fit_radius_column].to_numpy(dtype=float)
+        if len(episodes)
+        else np.array([])
+    )
+    circle_fit_error_values = (
+        episodes["circle_fit_normalized_radial_rmse"].to_numpy(dtype=float)
+        if len(episodes)
+        else np.array([])
+    )
     centers = (
         (episodes["start_s"] + episodes["end_s"]).to_numpy(dtype=float) / 2
         if len(episodes)
@@ -857,6 +989,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
     recurrence = np.diff(centers)
     orbit_duration = sum(grid_time[end] - grid_time[start] for start, end in intervals)
+    candidate_duration = sum(
+        grid_time[end] - grid_time[start] for start, end in candidate_intervals
+    )
     recording_duration = float(grid_time[-1] - grid_time[0])
     camera_horizontal_proxy = (
         x_col.startswith("front_image_x_") and y_col.startswith("side_image_x_")
@@ -864,9 +999,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     method_notes = [
         "The source CSV is not modified.",
         "Only gaps at or below max_gap_samples are interpolated on the derived analysis grid.",
-        "Radius is the median 2-D band-pass RMS envelope within each detected episode.",
+        "The band-pass RMS envelope is an oscillation-amplitude candidate signal, not a geometric radius.",
+        "Candidate windows are validated with an explicit harmonic fit whose center may move linearly within each fit window.",
+        "Circle-fit radius is the mean distance from the fitted moving center; radial RMSE measures departure from that circle.",
+        "Axis ratio, angular coverage, and winding consistency reject line-like or partial-arc motion.",
+        "An RMS candidate is accepted as an episode only when the configured fraction of its local geometry windows pass; per-sample fit status remains in the derived CSV.",
         "Frequency is the fitted winding rate of ellipse-normalized unwrapped XY phase.",
-        "Boundary sensitivity reruns detection at 0.8x, 1.0x, and 1.5x the primary threshold.",
+        "Boundary sensitivity reruns the RMS candidate stage at 0.8x, 1.0x, and 1.5x the primary threshold.",
         "Reported position units are inherited from the selected input columns or --position-unit; calibration error is not estimated by this script.",
     ]
     if camera_horizontal_proxy:
@@ -898,11 +1037,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "sample_rate_hz": sample_rate_hz,
         "recording_start_s": float(grid_time[0]),
         "recording_end_s": float(grid_time[-1]),
+        "candidate_episode_count": int(len(candidate_intervals)),
         "episode_count": int(len(episodes)),
+        "candidate_duty_cycle": (
+            candidate_duration / recording_duration if recording_duration > 0 else 0.0
+        ),
         "orbit_duty_cycle": orbit_duration / recording_duration if recording_duration > 0 else 0.0,
         "frequency_hz": summary_stats(frequency_values),
         "period_s": summary_stats(period_values),
         f"radius_{unit_key}": summary_stats(radius_values),
+        f"circle_fit_radius_{unit_key}": summary_stats(circle_fit_radius_values),
+        "circle_fit_normalized_radial_rmse": summary_stats(
+            circle_fit_error_values
+        ),
         "recurrence_s": summary_stats(recurrence),
         "threshold": {"value": threshold, "unit": unit, "method": threshold_method},
         "boundary_sensitivity": sensitivity,
@@ -914,6 +1061,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "merge_gap_s": args.merge_gap_s,
             "smooth_window_s": args.smooth_window_s,
             "radius_window_s": args.radius_window_s,
+            "fit_window_s": fit_window_s,
+            "fit_step_s": fit_step_s,
+            "fit_minimum_turns": fit_minimum_turns,
+            "fit_minimum_axis_ratio": fit_minimum_axis_ratio,
+            "fit_maximum_normalized_radial_rmse": (
+                fit_maximum_normalized_radial_rmse
+            ),
+            "fit_minimum_direction_consistency": (
+                fit_minimum_direction_consistency
+            ),
+            "fit_minimum_accepted_fraction": fit_minimum_accepted_fraction,
+            "geometric_validation_enabled": not rms_only,
             "max_gap_samples": args.max_gap_samples,
         },
         "method_notes": method_notes,
@@ -940,6 +1099,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         oscillatory,
         radius_envelope,
         threshold,
+        candidate_intervals,
         intervals,
         sample_rate_hz,
         (args.band_low_hz, args.band_high_hz),
