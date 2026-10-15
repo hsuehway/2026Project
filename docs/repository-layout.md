@@ -47,6 +47,12 @@ while all new organizational folders use the convention above.
 The moves do not modify the files themselves. Recorded raw-media paths remain
 unchanged.
 
+`Video Tracking Chin Lab/analyze_particle_modes.py` is a compatibility launcher
+for `analysis/orbit-detection/code/analyze_particle_modes.py`. Keep the numerical
+implementation in the latter location so old commands continue to work without
+maintaining duplicate analysis code. The Studio's `/sp6/` route serves
+`analysis/studies/sp6/`, including its local data bundle and companion video.
+
 ## Data policy
 
 Raw videos and calibration captures are stored outside normal Git history.
@@ -54,3 +60,9 @@ Derived artifacts are reproducible and remain local unless a specific dataset
 is intentionally versioned with provenance. For collaboration, use Git LFS or
 an external research-data repository after documenting file size, ownership,
 retention, and access requirements.
+
+The initial repository snapshot already includes eight videos (about 210 MB)
+under `Video Tracking Chin Lab/Videos/`. The ignore rules prevent new recordings
+from being added accidentally; they do not remove existing tracked files or
+rewrite history. Moving those historical assets to Git LFS or external storage
+requires a separate storage and migration decision.

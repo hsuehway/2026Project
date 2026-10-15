@@ -14,7 +14,7 @@ outputs_bubble_shapes/
 .sp_trajectory_studio_session.json
 
 # Browser-imported raw media remain local and outside normal Git history.
-Videos/imported/
-Backgrounds/imported/
+Videos/
+Backgrounds/
 calibrations/
 SP6_online-video-cutter.com_20260831_114256/

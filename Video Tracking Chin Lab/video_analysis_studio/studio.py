@@ -1025,7 +1025,9 @@ class StudioRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/sp6" or parsed.path.startswith("/sp6/"):
             relative = parsed.path.removeprefix("/sp6/") if parsed.path.startswith("/sp6/") else ""
             relative = relative or "sp6-orbit-viewer.html"
-            root = (self.server.backend.project_root.parent / "orbit").resolve()
+            root = (
+                self.server.backend.project_root.parent / "analysis" / "studies" / "sp6"
+            ).resolve()
             target = (root / relative).resolve()
             try:
                 target.relative_to(root)
